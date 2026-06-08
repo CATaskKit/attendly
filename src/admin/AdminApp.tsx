@@ -1,0 +1,381 @@
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../lib/auth';
+import { ADMIN_VARS } from './theme';
+import {
+  AIcon, AAvatar, ACard, APill, ABadge, KPI, Segmented, AToast, BtnGhost, BtnPrimary, PageHead, Spinner,
+} from './ui';
+import {
+  listEmployees, addEmployee, deleteEmployee, listLeave, decideLeave, listHolidays,
+  dashboardStats, hasEmployees, seedSampleData,
+  type Employee, type LeaveRow, type Holiday, type Stats,
+} from '../lib/api';
+
+const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
+const fmtRange = (a: string | null, b: string | null) => {
+  const f = (d: string | null) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—');
+  return a === b ? f(a) : `${f(a)} – ${f(b)}`;
+};
+
+type Page = 'dashboard' | 'approvals' | 'employees' | 'holidays';
+const NAV: { id: Page; icon: string; label: string }[] = [
+  { id: 'dashboard', icon: 'grid', label: 'Dashboard' },
+  { id: 'approvals', icon: 'inbox', label: 'Leave Approvals' },
+  { id: 'employees', icon: 'users', label: 'Employees' },
+  { id: 'holidays', icon: 'calendar', label: 'Holidays' },
+];
+
+export default function AdminApp() {
+  const navigate = useNavigate();
+  const { profile, role, signOut } = useAuth();
+  const orgId = profile?.org_id ?? null;
+  const canManage = role === 'owner' || role === 'hr';
+
+  const [page, setPage] = useState<Page>('dashboard');
+  const [loading, setLoading] = useState(true);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [leave, setLeave] = useState<LeaveRow[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [toast, setToast] = useState<{ text: string; tone: string; icon: string } | null>(null);
+  const [seeding, setSeeding] = useState(false);
+
+  const fire = (text: string, tone = 'green', icon = 'checkCircle') => { setToast({ text, tone, icon }); setTimeout(() => setToast(null), 2600); };
+
+  const reload = useCallback(async () => {
+    const [emp, lv, hol, st] = await Promise.all([listEmployees(), listLeave(), listHolidays(), dashboardStats()]);
+    setEmployees(emp); setLeave(lv); setHolidays(hol); setStats(st);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try { await reload(); } catch (e) { console.error(e); } finally { if (active) setLoading(false); }
+    })();
+    return () => { active = false; };
+  }, [reload]);
+
+  const onSeed = async () => {
+    if (!orgId) return;
+    setSeeding(true);
+    try {
+      if (!(await hasEmployees())) await seedSampleData(orgId);
+      await reload();
+      fire('Sample data loaded');
+    } catch (e) { console.error(e); fire('Could not load sample data', 'red', 'xCircle'); }
+    finally { setSeeding(false); }
+  };
+
+  const onDecide = async (row: LeaveRow, action: 'approve' | 'reject') => {
+    try {
+      await decideLeave(row, action);
+      await reload();
+      fire(action === 'approve' ? `${row.emp}'s leave ${row.stage === 'manager' ? 'forwarded to HR' : 'approved'}` : `${row.emp}'s leave rejected`, action === 'approve' ? 'green' : 'red', action === 'approve' ? 'checkCircle' : 'xCircle');
+    } catch (e) { console.error(e); fire('Action failed', 'red', 'xCircle'); }
+  };
+
+  const onAddEmployee = async (e: Partial<Employee>) => {
+    if (!orgId) return;
+    try { await addEmployee(orgId, e); await reload(); fire('Employee added'); }
+    catch (err) { console.error(err); fire('Could not add employee', 'red', 'xCircle'); }
+  };
+  const onDeleteEmployee = async (id: string) => {
+    try { await deleteEmployee(id); await reload(); fire('Employee removed', 'red', 'trash'); }
+    catch (e) { console.error(e); fire('Delete failed', 'red', 'xCircle'); }
+  };
+
+  const pendingCount = leave.filter((l) => l.status === 'Pending').length;
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', ...ADMIN_VARS, background: 'var(--bg)', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+      {/* SIDEBAR */}
+      <aside style={{ width: 250, flexShrink: 0, background: 'var(--side-bg)', borderRight: '1px solid var(--side-line)', display: 'flex', flexDirection: 'column', padding: '22px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px 22px' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(140deg, var(--accent), var(--accent-deep))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AIcon name="check" size={20} color="#fff" sw={2.8} />
+          </div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em' }}>Attendly</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {NAV.map((it) => {
+            const on = page === it.id;
+            return (
+              <button key={it.id} onClick={() => setPage(it.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left',
+                padding: '10px 12px', borderRadius: 11, border: 'none', cursor: 'pointer',
+                background: on ? 'var(--side-active-bg)' : 'transparent',
+                color: on ? 'var(--side-active-ink)' : 'var(--side-ink)', fontWeight: on ? 700 : 600, fontSize: 14,
+              }}>
+                <AIcon name={it.icon} size={20} color={on ? 'var(--accent)' : 'var(--side-dim)'} sw={on ? 2 : 1.8} />
+                <span style={{ flex: 1 }}>{it.label}</span>
+                {it.id === 'approvals' && pendingCount > 0 && <span style={{ background: 'var(--accent)', color: '#fff', fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '1px 7px', minWidth: 20, textAlign: 'center' }}>{pendingCount}</span>}
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={() => navigate('/app')} style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', padding: '10px 12px', borderRadius: 11, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--side-ink)', fontWeight: 600, fontSize: 14 }}>
+          <AIcon name="house" size={20} color="var(--side-dim)" /> <span style={{ flex: 1 }}>Employee app</span>
+        </button>
+        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 11, padding: '10px 8px', borderRadius: 12, background: 'var(--side-hover)' }}>
+          <AAvatar name={profile?.full_name || 'You'} size={36} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--side-active-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{profile?.full_name || 'You'}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--side-dim)', textTransform: 'capitalize' }}>{role}</div>
+          </div>
+          <button onClick={() => void signOut().then(() => navigate('/'))} title="Sign out" style={{ border: 'none', background: 'none', cursor: 'pointer', display: 'flex' }}>
+            <AIcon name="logout" size={17} color="var(--side-dim)" />
+          </button>
+        </div>
+      </aside>
+
+      {/* MAIN */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <header style={{ height: 66, flexShrink: 0, background: 'var(--panel)', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 16, padding: '0 28px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 40, padding: '0 14px', borderRadius: 11, background: 'var(--bg)', width: 320, maxWidth: '40%' }}>
+            <AIcon name="search" size={18} color="var(--ink-3)" />
+            <input placeholder="Search employees, requests…" style={{ border: 'none', outline: 'none', background: 'none', fontSize: 13.5, color: 'var(--ink-1)', width: '100%' }} />
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span style={{ fontSize: 13, color: 'var(--ink-3)', fontWeight: 600 }}>{new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            <div style={{ width: 1, height: 28, background: 'var(--line)' }} />
+            <AAvatar name={profile?.full_name || 'You'} size={36} />
+          </div>
+        </header>
+
+        <main style={{ flex: 1, overflowY: 'auto', padding: 28 }}>
+          {loading ? <Spinner label="Loading your workspace…" />
+            : !canManage && employees.length === 0 ? <EmptyManager />
+            : employees.length === 0 && leave.length === 0 ? (
+              <EmptyState seeding={seeding} canSeed={canManage} onSeed={onSeed} />
+            ) : page === 'dashboard' ? (
+              <Dashboard stats={stats} leave={leave} onGo={setPage} onDecide={onDecide} />
+            ) : page === 'approvals' ? (
+              <Approvals leave={leave} role={role} onDecide={onDecide} />
+            ) : page === 'employees' ? (
+              <Employees employees={employees} canManage={canManage} onAdd={onAddEmployee} onDelete={onDeleteEmployee} />
+            ) : (
+              <Holidays holidays={holidays} />
+            )}
+        </main>
+      </div>
+
+      <AToast show={!!toast} text={toast?.text} tone={toast?.tone} icon={toast?.icon} />
+    </div>
+  );
+}
+
+// ── Empty states ──────────────────────────────────────────────────────
+function EmptyState({ seeding, canSeed, onSeed }: { seeding: boolean; canSeed: boolean; onSeed: () => void }) {
+  return (
+    <div style={{ maxWidth: 520, margin: '60px auto 0', textAlign: 'center' }}>
+      <div style={{ width: 64, height: 64, borderRadius: 18, margin: '0 auto', background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <AIcon name="sparkles" size={30} color="var(--accent)" sw={1.9} />
+      </div>
+      <h1 style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em', margin: '20px 0 8px' }}>Your workspace is ready</h1>
+      <p style={{ margin: '0 auto 22px', maxWidth: 400, fontSize: 14.5, color: 'var(--ink-3)', lineHeight: 1.6 }}>
+        There's no data yet. {canSeed ? 'Load a realistic sample team to explore the admin console, or add your own employees.' : 'Ask an Owner or HR admin to add employees.'}
+      </p>
+      {canSeed && <BtnPrimary icon="sparkles" onClick={onSeed} disabled={seeding}>{seeding ? 'Loading…' : 'Load sample data'}</BtnPrimary>}
+    </div>
+  );
+}
+function EmptyManager() {
+  return (
+    <div style={{ maxWidth: 520, margin: '60px auto 0', textAlign: 'center', color: 'var(--ink-3)' }}>
+      <AIcon name="users" size={40} color="var(--ink-3)" />
+      <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-1)', margin: '16px 0 6px' }}>Nothing to manage yet</h1>
+      <p style={{ fontSize: 14, lineHeight: 1.6 }}>Once your team is added, employees and requests appear here.</p>
+    </div>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────
+function Dashboard({ stats, leave, onGo, onDecide }: { stats: Stats | null; leave: LeaveRow[]; onGo: (p: Page) => void; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
+  const pending = leave.filter((l) => l.status === 'Pending');
+  return (
+    <div>
+      <PageHead title="Dashboard" sub={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 16 }}>
+        <KPI icon="users" label="Total employees" value={stats?.employees ?? 0} tone="accent" />
+        <KPI icon="checkCircle" label="Present today" value={stats?.presentToday ?? 0} tone="green" />
+        <KPI icon="calendarClock" label="Active" value={stats?.active ?? 0} tone="purple" />
+        <KPI icon="grid" label="Departments" value={stats?.departments ?? 0} tone="amber" />
+        <KPI icon="inbox" label="Pending approvals" value={stats?.pendingLeave ?? 0} tone="amber" onClick={() => onGo('approvals')} />
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <ACard pad={0} style={{ overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px 14px' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Pending approvals</div>
+            <button onClick={() => onGo('approvals')} style={{ border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}>View all <AIcon name="chevronRight" size={15} color="var(--accent)" /></button>
+          </div>
+          {pending.length === 0 && <div style={{ padding: '8px 22px 22px', color: 'var(--ink-3)', fontSize: 13.5 }}>You're all caught up — no pending requests.</div>}
+          {pending.slice(0, 6).map((r) => (
+            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 22px', borderTop: '1px solid var(--line)' }}>
+              <AAvatar name={r.emp || '?'} size={36} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink-1)' }}>{r.emp}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{r.type} · {fmtRange(r.from_date, r.to_date)} · {r.days}d</div>
+              </div>
+              <button onClick={() => onDecide(r, 'approve')} title="Approve" style={{ width: 34, height: 34, borderRadius: 9, border: 'none', background: 'var(--green-soft)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AIcon name="check" size={17} color="var(--green)" sw={2.4} />
+              </button>
+            </div>
+          ))}
+        </ACard>
+      </div>
+    </div>
+  );
+}
+
+// ── Leave Approvals ───────────────────────────────────────────────────
+function Approvals({ leave, role, onDecide }: { leave: LeaveRow[]; role: string; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
+  const [tab, setTab] = useState('Pending');
+  const filtered = leave.filter((r) => (tab === 'All' ? true : r.status === tab));
+  const pendingCount = leave.filter((r) => r.status === 'Pending').length;
+  const canDecide = role === 'owner' || role === 'hr' || role === 'manager';
+  return (
+    <div>
+      <PageHead title="Leave Approvals" sub={`${pendingCount} request${pendingCount === 1 ? '' : 's'} awaiting action`} />
+      <div style={{ marginBottom: 16 }}>
+        <Segmented options={[{ value: 'Pending', label: 'Pending', n: pendingCount }, 'Approved', 'Rejected', 'All']} value={tab} onChange={setTab} />
+      </div>
+      {filtered.length === 0 ? (
+        <ACard style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>No {tab.toLowerCase()} requests.</ACard>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14 }}>
+          {filtered.map((r) => (
+            <ACard key={r.id} pad={16}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                <AAvatar name={r.emp || '?'} size={40} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-1)' }}>{r.emp}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{r.dept} · {r.code}</div>
+                </div>
+                <ABadge status={r.status} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+                <APill tone="neutral"><AIcon name={LEAVE_ICON[r.type] || 'calendar'} size={13} color="var(--ink-2)" />{r.type}</APill>
+                <span style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 600 }}>{r.half ? fmtRange(r.from_date, r.from_date) + ' · ½' : fmtRange(r.from_date, r.to_date)}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>{r.days}d</span>
+              </div>
+              {r.reason && <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.45, marginTop: 10 }}>{r.reason}</div>}
+              {r.status === 'Pending' ? (
+                canDecide && (
+                  <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+                    <button onClick={() => onDecide(r, 'reject')} style={{ flex: 1, height: 42, borderRadius: 11, border: '1.5px solid var(--red)', background: 'var(--panel)', color: 'var(--red)', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><AIcon name="x" size={17} color="var(--red)" sw={2.2} />Reject</button>
+                    <button onClick={() => onDecide(r, 'approve')} style={{ flex: 1.6, height: 42, borderRadius: 11, border: 'none', background: 'var(--green)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><AIcon name="check" size={17} color="#fff" sw={2.4} />{r.stage === 'manager' ? 'Approve → HR' : 'Approve'}</button>
+                  </div>
+                )
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 13, paddingTop: 12, borderTop: '1px solid var(--line)', color: 'var(--ink-3)', fontSize: 12.5, fontWeight: 600 }}>
+                  <AIcon name={r.status === 'Approved' ? 'checkCircle' : 'xCircle'} size={15} color={r.status === 'Approved' ? 'var(--green)' : 'var(--red)'} />
+                  {r.status}
+                </div>
+              )}
+            </ACard>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Employees ─────────────────────────────────────────────────────────
+const td: CSSProperties = { padding: '13px 18px', borderBottom: '1px solid var(--line)', fontSize: 13.5, color: 'var(--ink-2)', whiteSpace: 'nowrap' };
+function Employees({ employees, canManage, onAdd, onDelete }: { employees: Employee[]; canManage: boolean; onAdd: (e: Partial<Employee>) => void; onDelete: (id: string) => void }) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <div>
+      <PageHead title="Employees" sub={`${employees.length} ${employees.length === 1 ? 'person' : 'people'}`}>
+        {canManage && <BtnPrimary icon="plus" onClick={() => setAdding(true)}>Add employee</BtnPrimary>}
+      </PageHead>
+      <ACard pad={0} style={{ overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+            <thead><tr>{['Employee', 'Department', 'Designation', 'Type', 'Reporting to', 'Status', ''].map((h, i) => <th key={i} style={{ textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '14px 18px', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {employees.map((e) => (
+                <tr key={e.id}>
+                  <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><AAvatar name={e.name} size={36} /><div><div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink-1)' }}>{e.name}</div><div style={{ fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{e.code}</div></div></div></td>
+                  <td style={td}>{e.dept || '—'}</td>
+                  <td style={td}>{e.designation || '—'}</td>
+                  <td style={td}><APill tone="neutral">{e.type || '—'}</APill></td>
+                  <td style={td}>{e.manager || '—'}</td>
+                  <td style={td}><ABadge status={e.status} /></td>
+                  <td style={{ ...td, textAlign: 'right' }}>{canManage && <button onClick={() => onDelete(e.id)} title="Remove" style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 6 }}><AIcon name="trash" size={17} color="var(--ink-3)" /></button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </ACard>
+      {adding && <AddEmployeeModal onClose={() => setAdding(false)} onSave={(e) => { onAdd(e); setAdding(false); }} />}
+    </div>
+  );
+}
+
+function AddEmployeeModal({ onClose, onSave }: { onClose: () => void; onSave: (e: Partial<Employee>) => void }) {
+  const [f, setF] = useState<Partial<Employee>>({ code: '', name: '', dept: '', designation: '', manager: '', type: 'Full-time', status: 'Active', email: '', phone: '' });
+  const u = (k: keyof Employee, v: string) => setF((s) => ({ ...s, [k]: v }));
+  const input: CSSProperties = { width: '100%', boxSizing: 'border-box', height: 42, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink-1)', outline: 'none' };
+  const lbl: CSSProperties = { display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink-2)', marginBottom: 6 };
+  const save = () => { if (!f.code?.trim() || !f.name?.trim()) return; onSave(f); };
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(15,23,34,0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 520, maxWidth: '100%', background: 'var(--panel)', borderRadius: 18, boxShadow: '0 30px 80px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink-1)' }}>Add employee</div>
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: 'none', background: 'var(--soft)', cursor: 'pointer' }}><AIcon name="x" size={17} color="var(--ink-2)" /></button>
+        </div>
+        <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <label><span style={lbl}>Emp code *</span><input style={input} value={f.code || ''} onChange={(e) => u('code', e.target.value)} placeholder="CTK-1001" /></label>
+          <label><span style={lbl}>Name *</span><input style={input} value={f.name || ''} onChange={(e) => u('name', e.target.value)} placeholder="Full name" /></label>
+          <label><span style={lbl}>Department</span><input style={input} value={f.dept || ''} onChange={(e) => u('dept', e.target.value)} placeholder="Engineering" /></label>
+          <label><span style={lbl}>Designation</span><input style={input} value={f.designation || ''} onChange={(e) => u('designation', e.target.value)} placeholder="Engineer" /></label>
+          <label><span style={lbl}>Reporting to</span><input style={input} value={f.manager || ''} onChange={(e) => u('manager', e.target.value)} placeholder="Manager name" /></label>
+          <label><span style={lbl}>Type</span>
+            <select style={{ ...input, appearance: 'none' }} value={f.type || 'Full-time'} onChange={(e) => u('type', e.target.value)}>
+              {['Full-time', 'Part-time', 'Contract'].map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </label>
+          <label><span style={lbl}>Work email</span><input style={input} value={f.email || ''} onChange={(e) => u('email', e.target.value)} placeholder="name@company.com" /></label>
+          <label><span style={lbl}>Phone</span><input style={input} value={f.phone || ''} onChange={(e) => u('phone', e.target.value)} placeholder="+91 …" /></label>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, padding: '16px 24px', borderTop: '1px solid var(--line)', background: 'var(--bg)' }}>
+          <BtnGhost onClick={onClose}>Cancel</BtnGhost>
+          <BtnPrimary icon="plus" onClick={save}>Add employee</BtnPrimary>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Holidays ──────────────────────────────────────────────────────────
+function Holidays({ holidays }: { holidays: Holiday[] }) {
+  const tone: Record<string, 'accent' | 'purple' | 'amber'> = { National: 'accent', Festival: 'purple', Optional: 'amber' };
+  return (
+    <div>
+      <PageHead title="Holidays" sub={`${holidays.length} holidays`} />
+      {holidays.length === 0 ? (
+        <ACard style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>No holidays yet.</ACard>
+      ) : (
+        <ACard pad={0} style={{ overflow: 'hidden' }}>
+          {holidays.map((h, i) => (
+            <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 15, padding: '14px 18px', borderBottom: i < holidays.length - 1 ? '1px solid var(--line)' : 'none' }}>
+              <div style={{ width: 50, height: 50, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase' }}>{new Date(h.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' })}</span>
+                <span style={{ fontSize: 19, fontWeight: 800, color: 'var(--accent)', lineHeight: 1 }}>{new Date(h.date + 'T00:00:00').getDate()}</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>{h.name}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>{new Date(h.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })}{h.description ? ` · ${h.description}` : ''}</div>
+              </div>
+              <APill tone={tone[h.type] || 'neutral'}>{h.type}</APill>
+            </div>
+          ))}
+        </ACard>
+      )}
+    </div>
+  );
+}

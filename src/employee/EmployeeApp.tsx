@@ -23,7 +23,7 @@ function useDemoClock() {
 
 export default function EmployeeApp() {
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+  const { signOut, role } = useAuth();
   const t = DEFAULT_TWEAKS;
   const now = useDemoClock();
 
@@ -79,6 +79,8 @@ export default function EmployeeApp() {
       showToast(`${r ? r.name + "'s" : ''} leave rejected`, 'x');
     },
     logout: () => { void signOut().then(() => navigate('/')); },
+    role,
+    goAdmin: () => navigate('/admin'),
   };
 
   const vars = themeVars(t);

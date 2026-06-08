@@ -62,4 +62,6 @@ export type Ctx = {
   approveTeam: (id: string) => void;
   rejectTeam: (id: string) => void;
   logout: () => void;
+  role?: string;
+  goAdmin?: () => void;
 };

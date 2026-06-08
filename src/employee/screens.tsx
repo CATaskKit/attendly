@@ -335,6 +335,16 @@ export function ProfileScreen({ ctx }: { ctx: Ctx }) {
         ))}
       </Card>
 
+      {(ctx.role === 'owner' || ctx.role === 'hr' || ctx.role === 'manager') && ctx.goAdmin && (
+        <Card pad={0} style={{ overflow: 'hidden', marginTop: 14 }}>
+          <div onClick={ctx.goAdmin} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '15px 16px', cursor: 'pointer' }}>
+            <Icon name="briefcase" size={19} color="var(--accent)" />
+            <span style={{ flex: 1, fontSize: 14.5, fontWeight: 700, color: 'var(--accent)' }}>Admin console</span>
+            <Icon name="chevronRight" size={18} color="var(--text-3)" />
+          </div>
+        </Card>
+      )}
+
       <button onClick={() => ctx.openOverlay('logout')} style={{
         width: '100%', marginTop: 14, height: 52, borderRadius: 'var(--r-card)',
         border: 'var(--card-border)', background: 'var(--card)', boxShadow: 'var(--card-shadow)',
