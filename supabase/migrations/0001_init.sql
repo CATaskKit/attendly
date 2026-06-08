@@ -197,6 +197,9 @@ create or replace function public.create_organization(org_name text, display tex
 returns uuid language plpgsql security definer set search_path = public as $$
 declare new_org uuid;
 begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
   if (select org_id from profiles where id = auth.uid()) is not null then
     raise exception 'User already belongs to an organization';
   end if;
@@ -205,6 +208,10 @@ begin
   update profiles set org_id = new_org, role = 'owner' where id = auth.uid();
   return new_org;
 end $$;
+
+-- Only authenticated users may create an organization.
+revoke all on function public.create_organization(text, text) from anon, public;
+grant execute on function public.create_organization(text, text) to authenticated;
 
 -- ──────────────────────────────────────────────────────────────────────────
 -- New auth user → bare profile (org assigned later via create_organization
