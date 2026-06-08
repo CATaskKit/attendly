@@ -133,3 +133,38 @@ export async function seedSampleData(orgId: string): Promise<void> {
   await s.from('leave_requests').insert(SAMPLE_LEAVE.map((l) => ({ org_id: orgId, ...l })));
   await s.from('holidays').insert(SAMPLE_HOLIDAYS.map((h) => ({ org_id: orgId, ...h })));
 }
+
+// ── Employee self-service (attendance + own leave) ─────────────────────
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+export async function applyLeave(orgId: string, p: { empName: string; type: string; days: number; half: boolean; reason: string }): Promise<void> {
+  const from = new Date();
+  const to = new Date();
+  to.setDate(to.getDate() + Math.max(0, Math.ceil(p.days) - 1));
+  const { error } = await db().from('leave_requests').insert({
+    org_id: orgId, emp: p.empName, type: p.type, from_date: isoDate(from), to_date: isoDate(to),
+    days: p.days, half: p.half, reason: p.reason, status: 'Pending', stage: 'manager',
+  });
+  if (error) throw error;
+}
+
+export async function myLeave(empName: string): Promise<LeaveRow[]> {
+  const { data, error } = await db().from('leave_requests').select('*').eq('emp', empName).order('applied_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as LeaveRow[];
+}
+
+export async function checkIn(orgId: string): Promise<string> {
+  const { data, error } = await db().from('attendance').insert({
+    org_id: orgId, day: isoDate(new Date()), check_in_at: new Date().toISOString(), status: 'Present',
+  }).select('id').single();
+  if (error) throw error;
+  return (data as { id: string }).id;
+}
+
+export async function checkOut(attendanceId: string, workSeconds: number): Promise<void> {
+  const { error } = await db().from('attendance').update({
+    check_out_at: new Date().toISOString(), work_seconds: Math.round(workSeconds),
+  }).eq('id', attendanceId);
+  if (error) throw error;
+}

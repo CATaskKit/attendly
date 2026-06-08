@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { myLeave, applyLeave, checkIn, checkOut, type LeaveRow } from '../lib/api';
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
@@ -8,6 +9,18 @@ import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screen
 import { LeaveScreen, ApprovalsScreen } from './leave';
 import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm } from './overlays';
 import { INITIAL_LEAVE, INITIAL_TEAM, type Ctx, type LeaveRequest, type Status, type TeamRequest } from './data';
+
+// Map a Supabase leave row to the employee app's LeaveRequest shape.
+function mapLeave(r: LeaveRow): LeaveRequest {
+  const fmt = (d: string | null) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—');
+  const status: LeaveRequest['status'] = r.status === 'Approved' ? 'Approved' : r.status === 'Rejected' ? 'Rejected' : 'Pending';
+  return {
+    type: r.type, from: fmt(r.from_date), to: fmt(r.to_date), half: r.half, days: Number(r.days),
+    status,
+    mgr: r.stage === 'hr' || r.status === 'Approved',
+    rejectedBy: r.status === 'Rejected' ? 'mgr' : undefined,
+  };
+}
 
 // demo clock seeded at 9:41 today, ticking live
 function useDemoClock() {
@@ -23,9 +36,14 @@ function useDemoClock() {
 
 export default function EmployeeApp() {
   const navigate = useNavigate();
-  const { signOut, role } = useAuth();
+  const { signOut, role, configured, profile } = useAuth();
   const t = DEFAULT_TWEAKS;
   const now = useDemoClock();
+
+  const orgId = profile?.org_id ?? null;
+  const empName = profile?.full_name || 'You';
+  const live = configured && !!orgId;
+  const [attendanceId, setAttendanceId] = useState<string | null>(null);
 
   const [tab, setTab] = useState('home');
   const [overlay, setOverlay] = useState<string | null>(null);
@@ -33,8 +51,15 @@ export default function EmployeeApp() {
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
   const [toast, setToast] = useState<{ text: string; icon: string } | null>(null);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(INITIAL_LEAVE);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(live ? [] : INITIAL_LEAVE);
   const [teamRequests, setTeamRequests] = useState<TeamRequest[]>(INITIAL_TEAM);
+
+  const loadMyLeave = useCallback(async () => {
+    if (!live) return;
+    try { setLeaveRequests((await myLeave(empName)).map(mapLeave)); } catch (e) { console.error(e); }
+  }, [live, empName]);
+
+  useEffect(() => { void loadMyLeave(); }, [loadMyLeave]);
 
   const showToast = (text: string, icon = 'checkCircle') => {
     setToast({ text, icon });
@@ -61,11 +86,22 @@ export default function EmployeeApp() {
     tab, setTab: changeTab, status, checkInTime, checkOutTime, elapsed, now, leaveRequests,
     fmtClock, fmtDur,
     openOverlay: setOverlay, closeOverlay: () => setOverlay(null),
-    doCheckIn: () => { setCheckInTime(new Date(now.getTime())); setStatus('in'); setOverlay(null); showToast('Checked in at ' + fmtClock(now)); },
-    doCheckOut: () => { setCheckOutTime(new Date(now.getTime())); setStatus('done'); setOverlay(null); showToast('Checked out · ' + fmtClock(now)); },
+    doCheckIn: () => {
+      setCheckInTime(new Date(now.getTime())); setStatus('in'); setOverlay(null); showToast('Checked in at ' + fmtClock(now));
+      if (live && orgId) checkIn(orgId).then(setAttendanceId).catch(console.error);
+    },
+    doCheckOut: () => {
+      const out = new Date(now.getTime());
+      setCheckOutTime(out); setStatus('done'); setOverlay(null); showToast('Checked out · ' + fmtClock(now));
+      if (live && attendanceId) checkOut(attendanceId, checkInTime ? (out.getTime() - checkInTime.getTime()) / 1000 : 0).catch(console.error);
+    },
     submitLeave: (l) => {
       setLeaveRequests((r) => [{ ...l, status: 'Pending', mgr: false }, ...r]);
       setOverlay(null); showToast('Leave request submitted', 'leave');
+      if (live && orgId) {
+        applyLeave(orgId, { empName, type: l.type, days: l.days, half: l.half, reason: '' })
+          .then(loadMyLeave).catch(console.error);
+      }
     },
     teamRequests,
     approveTeam: (id) => {
