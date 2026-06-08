@@ -1,0 +1,57 @@
+/* Global resets, fonts and shared keyframes for all Attendly surfaces. */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #11151c;
+  /* Mobile / Capacitor: avoid rubber-band scroll & iOS auto text inflation */
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+#root { min-height: 100%; }
+button { font-family: inherit; }
+input, textarea, select { font-family: inherit; }
+a { color: inherit; }
+
+/* ── Employee app (mobile) keyframes ── */
+@keyframes pulseRing { 0% { transform: translate(-50%,-50%) scale(1); opacity: .5; } 100% { transform: translate(-50%,-50%) scale(3.4); opacity: 0; } }
+.pulse-ring { animation: pulseRing 2.2s ease-out infinite; }
+@keyframes slideUp { from { transform: translateY(28px); opacity: .4; } to { transform: translateY(0); opacity: 1; } }
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes sheetFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes loginShake { 10%,90%{transform:translateX(-1px)} 20%,80%{transform:translateX(2px)} 30%,50%,70%{transform:translateX(-4px)} 40%,60%{transform:translateX(4px)} }
+.login-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.4px solid rgba(255,255,255,0.35); border-top-color: #fff; animation: loginSpin .7s linear infinite; display: inline-block; }
+.login-spinner-dark { border: 2.4px solid var(--hair); border-top-color: var(--accent); }
+@keyframes loginSpin { to { transform: rotate(360deg); } }
+
+/* ── Admin / onboarding keyframes + hovers ── */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalPop { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes onbIn { from { transform: translateY(8px); } to { transform: none; } }
+.onb-anim { animation: onbIn .32s cubic-bezier(.2,.8,.2,1) both; }
+
+.a-row { transition: background .12s; }
+.a-row:hover { background: var(--soft); }
+.a-card-hover { transition: transform .14s, box-shadow .14s; }
+.a-card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(31,45,71,0.10); }
+.navitem { transition: background .12s, color .12s; background: transparent; }
+.navitem[data-on="false"]:hover { background: var(--side-hover); }
+.navitem[data-on="true"] { background: var(--side-active-bg); }
+
+.onb-field { border: 1px solid var(--line); border-radius: 11px; background: var(--panel); transition: border-color .12s, box-shadow .12s; }
+.onb-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
+.onb-prim:hover:not(:disabled) { filter: brightness(1.06); }
+.onb-prim:active:not(:disabled) { transform: translateY(1px); }
+.onb-ghost:hover { border-color: color-mix(in oklab, var(--accent) 40%, var(--line)); color: var(--ink-1); }
+.onb-step:hover { background: var(--soft) !important; }
+.onb-chip-x:hover { background: var(--soft) !important; opacity: 1 !important; color: var(--red) !important; }
+.onb-bare-select { appearance: none; -webkit-appearance: none; }
+
+select option { color: #0f1722; }
+
+/* scrollbars */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: rgba(139,149,164,0.4); border-radius: 9px; border: 2px solid transparent; background-clip: padding-box; }
+.no-scrollbar::-webkit-scrollbar { width: 0; height: 0; }

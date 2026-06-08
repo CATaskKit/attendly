@@ -1,0 +1,18 @@
+node_modules
+dist
+dist-ssr
+*.local
+*.tsbuildinfo
+.vite
+.DS_Store
+npm-debug.log*
+
+# Capacitor / Android build artifacts (the android/ project itself is kept)
+android/.gradle
+android/app/build
+android/build
+android/captures
+android/local.properties
+android/app/src/main/assets/public
+android/app/src/main/assets/capacitor.config.json
+.env
