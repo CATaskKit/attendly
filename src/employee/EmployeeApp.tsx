@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../lib/auth';
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
@@ -22,6 +23,7 @@ function useDemoClock() {
 
 export default function EmployeeApp() {
   const navigate = useNavigate();
+  const { signOut } = useAuth();
   const t = DEFAULT_TWEAKS;
   const now = useDemoClock();
 
@@ -76,7 +78,7 @@ export default function EmployeeApp() {
       const r = teamRequests.find((x) => x.id === id);
       showToast(`${r ? r.name + "'s" : ''} leave rejected`, 'x');
     },
-    logout: () => navigate('/'),
+    logout: () => { void signOut().then(() => navigate('/')); },
   };
 
   const vars = themeVars(t);
