@@ -48,6 +48,46 @@ export async function listDepartments(): Promise<Dept[]> {
   return (data ?? []) as Dept[];
 }
 
+// ── Organization + onboarding writes ──────────────────────────────────
+export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string };
+
+export async function getOrganization(orgId: string): Promise<OrgRow | null> {
+  const { data, error } = await db().from('organizations').select('*').eq('id', orgId).single();
+  if (error) throw error;
+  return (data as OrgRow) ?? null;
+}
+
+export async function updateOrganization(orgId: string, fields: Partial<OrgRow>): Promise<void> {
+  const { error } = await db().from('organizations').update(fields).eq('id', orgId);
+  if (error) throw error;
+}
+
+export async function addDepartments(orgId: string, names: string[]): Promise<void> {
+  const rows = names.map((n) => n.trim()).filter(Boolean).map((name) => ({ org_id: orgId, name }));
+  if (!rows.length) return;
+  const { error } = await db().from('departments').insert(rows);
+  if (error) throw error;
+}
+
+export async function addLeaveTypes(orgId: string, types: { name: string; quota: number }[]): Promise<void> {
+  const rows = types.filter((t) => t.name.trim()).map((t) => ({ org_id: orgId, name: t.name.trim(), quota: t.quota }));
+  if (!rows.length) return;
+  const { error } = await db().from('leave_types').insert(rows);
+  if (error) throw error;
+}
+
+export async function addEmployees(orgId: string, emps: { name: string; email: string; dept: string; designation: string; manager: string }[]): Promise<void> {
+  const valid = emps.filter((e) => e.name.trim());
+  const rows = valid.map((e, i) => ({
+    org_id: orgId, code: `EMP-${String(i + 1).padStart(3, '0')}`,
+    name: e.name.trim(), email: e.email.trim() || null, dept: e.dept || null,
+    designation: e.designation || null, manager: e.manager || null, type: 'Full-time', status: 'Active',
+  }));
+  if (!rows.length) return;
+  const { error } = await db().from('employees').insert(rows);
+  if (error) throw error;
+}
+
 // ── Holidays ──────────────────────────────────────────────────────────
 export async function listHolidays(): Promise<Holiday[]> {
   const { data, error } = await db().from('holidays').select('*').order('date');

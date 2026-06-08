@@ -7,6 +7,7 @@ import { AuthProvider, useAuth, type Role } from './lib/auth';
 import Login from './employee/Login';
 import EmployeeApp from './employee/EmployeeApp';
 import AdminApp from './admin/AdminApp';
+import OnboardingApp from './onboarding/OnboardingApp';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { loading, authed } = useAuth();
@@ -27,6 +28,7 @@ const router = createHashRouter([
   { path: '/', element: <Login /> },
   { path: '/app', element: <RequireAuth><EmployeeApp /></RequireAuth> },
   { path: '/admin', element: <RequireRole roles={['owner', 'hr', 'manager']}><AdminApp /></RequireRole> },
+  { path: '/onboarding', element: <RequireRole roles={['owner', 'hr']}><OnboardingApp /></RequireRole> },
 ]);
 
 void initNative();

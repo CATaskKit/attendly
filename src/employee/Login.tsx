@@ -111,7 +111,7 @@ function LoginScreen() {
         setPhase('idle');
         return;
       }
-      navigate('/app');
+      navigate('/onboarding');
     }
   };
 
