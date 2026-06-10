@@ -10,13 +10,6 @@ permissions:
   pages: write
   id-token: write
 
-# GitHub's Pages actions (configure-pages, upload-pages-artifact, deploy-pages)
-# still ship a Node 20 runner. This documented opt-in runs every JavaScript
-# action on Node 24, clearing the deprecation warning until they publish Node 24
-# releases. checkout/setup-node below are already on their Node 24 majors.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 # Allow one concurrent deployment, cancel in-progress runs on new pushes.
 concurrency:
   group: pages
@@ -38,8 +31,8 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: ./dist
 
@@ -51,4 +44,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
