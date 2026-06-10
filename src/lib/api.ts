@@ -633,3 +633,26 @@ export async function checkOut(attendanceId: string, workSeconds: number, detail
   const { error } = await db().from('attendance').update(patch).eq('id', attendanceId);
   if (error) throw error;
 }
+
+// ── Notifications ─────────────────────────────────────────────────────
+export type Notification = {
+  id: string; type: string; title: string; body: string | null; read: boolean; created_at: string;
+};
+
+export async function listNotifications(limit = 30): Promise<Notification[]> {
+  const { data, error } = await db().from('notifications')
+    .select('id,type,title,body,read,created_at')
+    .order('created_at', { ascending: false }).limit(limit);
+  if (error) throw error;
+  return (data ?? []) as Notification[];
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  const { error } = await db().from('notifications').update({ read: true }).eq('read', false);
+  if (error) throw error;
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  const { error } = await db().from('notifications').update({ read: true }).eq('id', id);
+  if (error) throw error;
+}

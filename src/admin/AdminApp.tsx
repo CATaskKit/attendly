@@ -11,6 +11,8 @@ import {
   type Employee, type LeaveRow, type Holiday, type Stats,
 } from '../lib/api';
 import { fetchExportData, downloadWorkbook, SHEETS, type ExportData } from '../lib/export';
+import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
+import { onTablesChange, onTableChange } from '../lib/realtime';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -57,6 +59,9 @@ export default function AdminApp() {
     })();
     return () => { active = false; };
   }, [reload]);
+
+  // Live updates: refresh whenever leave/attendance/employees change anywhere.
+  useEffect(() => onTablesChange(['leave_requests', 'attendance', 'employees'], () => { void reload(); }), [reload]);
 
   const onSeed = async () => {
     if (!orgId) return;
@@ -131,9 +136,6 @@ export default function AdminApp() {
             );
           })}
         </div>
-        <button onClick={() => navigate('/app')} style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', padding: '10px 12px', borderRadius: 11, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--side-ink)', fontWeight: 600, fontSize: 14 }}>
-          <AIcon name="house" size={20} color="var(--side-dim)" /> <span style={{ flex: 1 }}>Employee app</span>
-        </button>
         <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 11, padding: '10px 8px', borderRadius: 12, background: 'var(--side-hover)' }}>
           <AAvatar name={profile?.full_name || 'You'} size={36} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -155,6 +157,7 @@ export default function AdminApp() {
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
             <span style={{ fontSize: 13, color: 'var(--ink-3)', fontWeight: 600 }}>{new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            <NotificationBell />
             <div style={{ width: 1, height: 28, background: 'var(--line)' }} />
             <AAvatar name={profile?.full_name || 'You'} size={36} />
           </div>
@@ -504,6 +507,60 @@ function Reports({ orgId, onToast }: { orgId: string | null; onToast: (t: string
               </div>
             ))}
           </ACard>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Notification bell (live) ──────────────────────────────────────────
+function NotificationBell() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<Notification[]>([]);
+
+  const load = useCallback(async () => {
+    try { setItems(await listNotifications()); } catch (e) { console.error(e); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => onTableChange('notifications', () => { void load(); }), [load]);
+
+  const unread = items.filter((n) => !n.read).length;
+  const fmtTime = (iso: string) => {
+    const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+  };
+  const onItem = (n: Notification) => { if (!n.read) void markNotificationRead(n.id).then(load).catch(console.error); };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen((o) => !o)} title="Notifications" style={{ position: 'relative', width: 42, height: 42, borderRadius: 11, border: '1px solid var(--line)', background: 'var(--panel)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <AIcon name="bell" size={20} color="var(--ink-2)" />
+        {unread > 0 && <span style={{ position: 'absolute', top: 7, right: 8, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 999, background: 'var(--red)', color: '#fff', fontSize: 10, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--panel)' }}>{unread}</span>}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
+          <div style={{ position: 'absolute', right: 0, top: 50, width: 360, maxHeight: 460, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, boxShadow: '0 18px 50px rgba(16,28,48,0.22)', zIndex: 100 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
+              <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink-1)' }}>Notifications</span>
+              {unread > 0 && <button onClick={() => { void markAllNotificationsRead().then(load); }} style={{ border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>Mark all read</button>}
+            </div>
+            {items.length === 0 ? (
+              <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>No notifications yet.</div>
+            ) : items.map((n) => (
+              <div key={n.id} onClick={() => onItem(n)} style={{ display: 'flex', gap: 11, padding: '12px 16px', borderBottom: '1px solid var(--line)', cursor: 'pointer', background: n.read ? 'transparent' : 'var(--accent-soft)' }}>
+                <div style={{ width: 8, flexShrink: 0, paddingTop: 5 }}>{!n.read && <span style={{ display: 'block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink-1)' }}>{n.title}</div>
+                  {n.body && <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 2, lineHeight: 1.4 }}>{n.body}</div>}
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 3 }}>{fmtTime(n.created_at)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </>
       )}
     </div>

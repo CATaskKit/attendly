@@ -6,6 +6,7 @@ import {
   listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
   type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow,
 } from '../lib/api';
+import { onTablesChange } from '../lib/realtime';
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
@@ -219,6 +220,11 @@ export default function EmployeeApp() {
   }, [applyTodayState, canApproveTeam, currentDay, live, orgId, profile]);
 
   useEffect(() => { void reloadLive(); }, [reloadLive]);
+  // Live updates: refresh when leave/attendance change for this tenant.
+  useEffect(() => {
+    if (!live) return;
+    return onTablesChange(['leave_requests', 'attendance'], () => { void reloadLive(); });
+  }, [live, reloadLive]);
   useEffect(() => {
     if (live) return;
     setEmployee(null);
