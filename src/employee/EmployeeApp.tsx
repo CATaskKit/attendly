@@ -10,7 +10,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
 import { collectAttendanceAudit, getDeviceInfo, type AttendanceAudit } from '../lib/attendanceAudit';
-import { fetchNetworkTime, formatAppDate } from '../lib/networkTime';
+import { fetchNetworkTime, formatAppDate, APP_TIME_ZONE } from '../lib/networkTime';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
 import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm } from './overlays';
@@ -94,23 +94,22 @@ function leaveErrorMessage(error: unknown) {
   return 'Could not submit leave request';
 }
 
-function useAppClock(demoMode: boolean) {
-  const base = useRef((() => { const d = new Date(); d.setHours(9, 41, 12, 0); return d.getTime(); })());
-  const start = useRef(Date.now());
+function useAppClock() {
+  // Always shows the real current time, corrected to network time once synced.
+  // (It used to fake 9:41 AM in demo mode, which read as hardcoded text.)
   const offset = useRef(0);
   const [clock, setClock] = useState(() => ({
-    now: demoMode ? new Date(base.current) : new Date(),
+    now: new Date(),
     synced: false,
     source: null as string | null,
   }));
   useEffect(() => {
     let active = true;
     offset.current = 0;
-    const nextNow = () => demoMode ? new Date(base.current + (Date.now() - start.current)) : new Date(Date.now() + offset.current);
+    const nextNow = () => new Date(Date.now() + offset.current);
     setClock({ now: nextNow(), synced: false, source: null });
 
     const syncClock = async () => {
-      if (demoMode) return;
       try {
         const synced = await fetchNetworkTime();
         if (!active) return;
@@ -124,13 +123,13 @@ function useAppClock(demoMode: boolean) {
 
     void syncClock();
     const tickId = setInterval(() => setClock((current) => ({ ...current, now: nextNow() })), 1000);
-    const syncId = demoMode ? null : window.setInterval(() => { void syncClock(); }, 5 * 60 * 1000);
+    const syncId = window.setInterval(() => { void syncClock(); }, 5 * 60 * 1000);
     return () => {
       active = false;
       clearInterval(tickId);
-      if (syncId != null) clearInterval(syncId);
+      clearInterval(syncId);
     };
-  }, [demoMode]);
+  }, []);
   return clock;
 }
 
@@ -139,7 +138,7 @@ export default function EmployeeApp() {
   const { signOut, role, configured, profile } = useAuth();
   const orgId = profile?.org_id ?? null;
   const live = configured && !!orgId;
-  const clock = useAppClock(!live);
+  const clock = useAppClock();
   const now = clock.now;
   const currentDay = isoDate(now);
   const t = DEFAULT_TWEAKS;
@@ -233,7 +232,7 @@ export default function EmployeeApp() {
     setTimeout(() => setToast(null), 2600);
   };
 
-  const fmtClock = (d: Date | null) => (d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '-');
+  const fmtClock = (d: Date | null) => (d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: APP_TIME_ZONE }) : '-');
   const fmtDur = (secs: number) => {
     secs = Math.max(0, Math.floor(secs));
     const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
