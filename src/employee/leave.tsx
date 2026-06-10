@@ -7,11 +7,18 @@ const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella',
 
 // ─────────────────────── LEAVE TAB ───────────────────────────────────
 export function LeaveScreen({ ctx }: { ctx: Ctx }) {
-  const balances = [
+  const fallback = [
     { name: 'Casual', icon: 'coffee', avail: 6, total: 12, tone: 'accent' },
     { name: 'Sick', icon: 'umbrella', avail: 4, total: 8, tone: 'warning' },
     { name: 'Paid', icon: 'briefcase', avail: 2, total: 15, tone: 'success' },
   ];
+  const tones = ['accent', 'warning', 'success', 'purple'];
+  const iconFor = (name: string) => LEAVE_ICON[name] || 'calendar';
+  const fmtDays = (days: number) => Number.isInteger(days) ? String(days) : days.toFixed(1);
+  const balances = ctx.live
+    ? ctx.leaveBalances.map((b, i) => ({ name: b.type, icon: iconFor(b.type), avail: b.available, total: b.allotted, tone: tones[i % tones.length] }))
+    : fallback;
+  const totalBalance = balances.reduce((sum, b) => sum + b.avail, 0);
   return (
     <div>
       <ScreenHeader title="Leave" subtitle="2 of 3 approvers respond same-day" />
@@ -19,15 +26,15 @@ export function LeaveScreen({ ctx }: { ctx: Ctx }) {
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
           <div>
             <div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Total balance</div>
-            <div style={{ fontSize: 34, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>12 <span style={{ fontSize: 16, color: 'var(--text-3)' }}>days</span></div>
+            <div style={{ fontSize: 34, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{fmtDays(totalBalance)} <span style={{ fontSize: 16, color: 'var(--text-3)' }}>days</span></div>
           </div>
           <Pill tone="success">+1.5 accrues monthly</Pill>
         </div>
         <div style={{ display: 'flex', height: 10, borderRadius: 999, overflow: 'hidden', marginTop: 16, gap: 2 }}>
-          <div style={{ flex: 6, background: 'var(--accent)' }} /><div style={{ flex: 4, background: 'var(--warning)' }} /><div style={{ flex: 2, background: 'var(--success)' }} />
+          {balances.map((b) => <div key={b.name} style={{ flex: Math.max(1, b.avail), background: `var(--${b.tone})` }} />)}
         </div>
         <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
-          {balances.map((b) => <Legend key={b.name} color={`var(--${b.tone})`} label={`${b.name} ${b.avail}`} />)}
+          {balances.map((b) => <Legend key={b.name} color={`var(--${b.tone})`} label={`${b.name} ${fmtDays(b.avail)}`} />)}
         </div>
       </Card>
 
@@ -35,8 +42,9 @@ export function LeaveScreen({ ctx }: { ctx: Ctx }) {
         {balances.map((b) => (
           <Card key={b.name} pad={13}>
             <Icon name={b.icon} size={20} color={`var(--${b.tone})`} />
-            <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1)', marginTop: 8, letterSpacing: '-0.02em' }}>{b.avail}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1)', marginTop: 8, letterSpacing: '-0.02em' }}>{fmtDays(b.avail)}</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-3)', fontWeight: 600 }}>{b.name} left</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 3 }}>Max {fmtDays(b.total)}</div>
           </Card>
         ))}
       </div>
@@ -105,27 +113,28 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
   const { teamRequests, approveTeam, rejectTeam } = ctx;
   const [filter, setFilter] = useState<'Pending' | 'All'>('Pending');
   const pending = teamRequests.filter((r) => r.status === 'Pending');
-  const approved = teamRequests.filter((r) => r.status === 'Approved').length;
+  const actioned = teamRequests.filter((r) => r.status !== 'Pending').length;
   const onLeave = teamRequests.filter((r) => r.status === 'Approved' && r.active).length;
   const shown = filter === 'Pending' ? pending : teamRequests;
+  const teamCount = new Set(teamRequests.map((r) => r.code).filter((code) => code && code !== '-')).size;
 
   return (
     <div>
       <ScreenHeader title="Approvals" subtitle={pending.length ? `${pending.length} request${pending.length > 1 ? 's' : ''} awaiting your review` : "You're all caught up"} />
 
       <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <Avatar name="Priya Nair" size={42} accent="var(--accent)" />
+        <Avatar name={ctx.employeeName} size={42} accent="var(--accent)" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>Design team</div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>Reporting to you · 6 members</div>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>Your team</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{teamCount ? `${teamCount} direct report${teamCount === 1 ? '' : 's'} with requests` : 'Direct reports'}</div>
         </div>
-        <Pill tone="accent"><Icon name="users" size={13} color="var(--accent)" />6</Pill>
+        <Pill tone="accent"><Icon name="users" size={13} color="var(--accent)" />{teamCount}</Pill>
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 18 }}>
         {[
           { v: pending.length, l: 'Pending', tone: 'warning' },
-          { v: approved, l: 'Approved', tone: 'success' },
+          { v: actioned, l: 'Actioned', tone: 'success' },
           { v: onLeave, l: 'Out today', tone: 'accent' },
         ].map((s) => (
           <Card key={s.l} pad={13}>
@@ -169,6 +178,7 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
 function ApprovalCard({ r, onApprove, onReject }: { r: TeamRequest; onApprove: () => void; onReject: () => void }) {
   const icon = LEAVE_ICON[r.type] || 'calendar';
   const isPending = r.status === 'Pending';
+  const statusLine = r.status === 'Forwarded' ? 'Forwarded to HR' : `${r.status} by you`;
   return (
     <Card pad={15}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -208,8 +218,8 @@ function ApprovalCard({ r, onApprove, onReject }: { r: TeamRequest; onApprove: (
         </div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 13, paddingTop: 12, borderTop: '1px solid var(--hair)', color: 'var(--text-3)' }}>
-          <Icon name={r.status === 'Approved' ? 'checkCircle' : 'x'} size={15} color={r.status === 'Approved' ? 'var(--success)' : 'var(--danger)'} strokeWidth={2.2} />
-          <span style={{ fontSize: 12.5, fontWeight: 600 }}>{r.status} by you{r.resolvedAt ? ` · ${r.resolvedAt}` : ''}</span>
+          <Icon name={r.status === 'Rejected' ? 'x' : 'checkCircle'} size={15} color={r.status === 'Rejected' ? 'var(--danger)' : 'var(--success)'} strokeWidth={2.2} />
+          <span style={{ fontSize: 12.5, fontWeight: 600 }}>{statusLine}{r.resolvedAt ? ` · ${r.resolvedAt}` : ''}</span>
         </div>
       )}
     </Card>

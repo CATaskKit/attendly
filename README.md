@@ -95,8 +95,6 @@ colors and layout. The reports surface keeps its class-based CSS scoped under
 
 ## Notes
 
-- All data is local, illustrative demo data — no backend. The reports DB layer
-  (`src/reports/db.ts`) is a small repository API that persists to `localStorage`
-  and could be repointed at a real backend (e.g. Supabase) without touching callers.
-- The DB architecture / ER-diagram docs and SQL migration from the bundle were
-  reference material and are not part of the four app surfaces implemented here.
+- The product runs in demo mode until `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are provided.
+- With Supabase configured and the migrations applied, auth, onboarding, admin data, employee attendance, leave, holidays, profile details, approvals, and Excel export use the live database.
+- See `SETUP.md` for the database setup steps.

@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, Card, Pill, SlideToConfirm } from './ui';
 import { MapView, VRow, SelfieTile } from './screens';
 import type { Ctx } from './data';
@@ -27,16 +27,36 @@ export function Overlay({ title, onClose, children, footer }: { title: string; o
 
 // ── CHECK IN ─────────────────────────────────────────────────────────
 export function CheckInScreen({ ctx }: { ctx: Ctx }) {
-  const { closeOverlay, doCheckIn, fmtClock, now } = ctx;
+  const { closeOverlay, doCheckIn, fmtClock, now, refreshAttendanceAudit, timeSynced } = ctx;
   const [selfie, setSelfie] = useState(false);
+  const [audit, setAudit] = useState(ctx.attendanceAudit);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingAudit(true);
+    refreshAttendanceAudit()
+      .then((next) => { if (active) setAudit(next); })
+      .finally(() => { if (active) setLoadingAudit(false); });
+    return () => { active = false; };
+  }, [refreshAttendanceAudit]);
+
+  const confirm = () => {
+    void refreshAttendanceAudit().then((latest) => doCheckIn(latest));
+  };
+  const locationText = audit.location || (loadingAudit ? 'Detecting location...' : 'Location not allowed');
+  const ipText = audit.ip || (loadingAudit ? 'Detecting IP...' : 'Unavailable');
+  const locationOk = !!audit.location;
+  const clockText = timeSynced ? 'Online synced' : 'Using device time';
+
   return (
-    <Overlay title="Check In" onClose={closeOverlay} footer={<SlideToConfirm label="Slide to check in" onConfirm={doCheckIn} />}>
-      <MapView />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, background: 'var(--success-soft)', borderRadius: 'var(--r-card)', padding: '13px 15px' }}>
-        <Icon name="shield" size={22} color="var(--success)" strokeWidth={2} />
+    <Overlay title="Check In" onClose={closeOverlay} footer={<SlideToConfirm label="Slide to check in" onConfirm={confirm} />}>
+      <MapView label={audit.location || 'Current device location'} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, background: locationOk ? 'var(--success-soft)' : 'var(--warning-soft)', borderRadius: 'var(--r-card)', padding: '13px 15px' }}>
+        <Icon name="shield" size={22} color={locationOk ? 'var(--success)' : 'var(--warning)'} strokeWidth={2} />
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--success)' }}>Inside office geofence</div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>42 m from HQ centre · accuracy ±8 m</div>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: locationOk ? 'var(--success)' : 'var(--warning)' }}>{locationOk ? 'Location captured' : loadingAudit ? 'Capturing location' : 'Location unavailable'}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{locationText}</div>
         </div>
       </div>
 
@@ -51,13 +71,15 @@ export function CheckInScreen({ ctx }: { ctx: Ctx }) {
 
       <div style={{ marginTop: 8 }}>
         <Card pad={16} style={{ marginTop: 10 }}>
-          <VRow icon="mapPin" label="Location" value="Brigade Tech Park, Whitefield" />
+          <VRow icon="mapPin" label="Location" value={locationText} ok={!!audit.location} />
           <div style={{ height: 1, background: 'var(--hair)' }} />
-          <VRow icon="clock" label="Time" value={fmtClock(now) + ' IST'} mono />
+          <VRow icon="clock" label="Time" value={fmtClock(now) + ' IST'} ok={timeSynced} mono />
           <div style={{ height: 1, background: 'var(--hair)' }} />
-          <VRow icon="wifi" label="Network IP" value="103.21.58.204" mono />
+          <VRow icon="wifi" label="Clock" value={clockText} ok={timeSynced} />
           <div style={{ height: 1, background: 'var(--hair)' }} />
-          <VRow icon="device" label="Device" value="iPhone 15 · iOS 18.2" />
+          <VRow icon="wifi" label="Network IP" value={ipText} ok={!!audit.ip} mono />
+          <div style={{ height: 1, background: 'var(--hair)' }} />
+          <VRow icon="device" label="Device" value={audit.device} />
         </Card>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 12, padding: '0 4px', color: 'var(--text-3)' }}>
           <Icon name="shield" size={14} color="var(--text-3)" />
@@ -70,7 +92,9 @@ export function CheckInScreen({ ctx }: { ctx: Ctx }) {
 
 // ── CHECK OUT ────────────────────────────────────────────────────────
 export function CheckOutScreen({ ctx }: { ctx: Ctx }) {
-  const { closeOverlay, doCheckOut, fmtClock, fmtDur, checkInTime, elapsed, now } = ctx;
+  const { closeOverlay, doCheckOut, fmtClock, fmtDur, checkInTime, elapsed, now, attendanceAudit, attendanceRows, timeSynced } = ctx;
+  const latestAudit = attendanceRows[0];
+  const clockText = timeSynced ? 'Online synced' : 'Using device time';
   return (
     <Overlay title="Check Out" onClose={closeOverlay} footer={<SlideToConfirm label="Slide to check out" tone="var(--success)" icon="arrowRight" onConfirm={doCheckOut} />}>
       <div style={{ borderRadius: 'var(--r-hero)', padding: 20, background: 'var(--hero)', color: '#fff', boxShadow: 'var(--hero-shadow)' }}>
@@ -95,9 +119,13 @@ export function CheckOutScreen({ ctx }: { ctx: Ctx }) {
 
       <div style={{ marginTop: 16 }}><MapView height={150} /></div>
       <Card pad={16} style={{ marginTop: 14 }}>
-        <VRow icon="mapPin" label="Check-out location" value="Brigade Tech Park, Whitefield" />
+        <VRow icon="clock" label="Clock" value={clockText} ok={timeSynced} />
         <div style={{ height: 1, background: 'var(--hair)' }} />
-        <VRow icon="device" label="Device" value="iPhone 15 · iOS 18.2" />
+        <VRow icon="mapPin" label="Check-out location" value={attendanceAudit.location || latestAudit?.location || 'Not captured'} ok={!!(attendanceAudit.location || latestAudit?.location)} />
+        <div style={{ height: 1, background: 'var(--hair)' }} />
+        <VRow icon="wifi" label="Network IP" value={attendanceAudit.ip || latestAudit?.ip || 'Unavailable'} ok={!!(attendanceAudit.ip || latestAudit?.ip)} mono />
+        <div style={{ height: 1, background: 'var(--hair)' }} />
+        <VRow icon="device" label="Device" value={attendanceAudit.device || latestAudit?.device || 'Unknown device'} />
       </Card>
     </Overlay>
   );
@@ -111,45 +139,80 @@ const LEAVE_TYPES = [
   { id: 'wfh', name: 'Work from home', icon: 'house' },
   { id: 'unpaid', name: 'Unpaid', icon: 'calendar' },
 ];
+type LeaveOption = { id: string; name: string; icon: string; available?: number; allotted?: number };
+const iconForLeave = (name: string) => LEAVE_TYPES.find((lt) => lt.name.toLowerCase() === name.toLowerCase())?.icon || 'calendar';
+const leaveOptionId = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'leave';
+const fmtDays = (days: number) => Number.isInteger(days) ? String(days) : days.toFixed(1);
 
 export function ApplyLeaveScreen({ ctx }: { ctx: Ctx }) {
   const { closeOverlay, submitLeave } = ctx;
-  const [type, setType] = useState('casual');
+  const leaveOptions = useMemo<LeaveOption[]>(() => (
+    ctx.live
+      ? ctx.leaveBalances.map((b) => ({ id: leaveOptionId(b.type), name: b.type, icon: iconForLeave(b.type), available: b.available, allotted: b.allotted }))
+      : LEAVE_TYPES
+  ), [ctx.live, ctx.leaveBalances]);
+  const [type, setType] = useState(LEAVE_TYPES[0].name);
   const [half, setHalf] = useState(false);
-  const [from] = useState('Jun 12');
-  const [to] = useState('Jun 13');
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const [fromDate, setFromDate] = useState(todayIso);
+  const [toDate, setToDate] = useState(tomorrow.toISOString().slice(0, 10));
   const [reason, setReason] = useState('');
   const [attachments, setAttachments] = useState<AttFile[]>([]);
   const [showUpload, setShowUpload] = useState(false);
-  const t = LEAVE_TYPES.find((x) => x.id === type)!;
+  useEffect(() => {
+    if (leaveOptions.length && !leaveOptions.some((x) => x.name === type)) setType(leaveOptions[0].name);
+  }, [leaveOptions, type]);
+  const t = leaveOptions.find((x) => x.name === type) ?? leaveOptions[0];
+  const displayDate = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const dayDiff = Math.max(1, Math.round((new Date(`${toDate}T00:00:00`).getTime() - new Date(`${fromDate}T00:00:00`).getTime()) / 86400000) + 1);
+  const days = half ? 0.5 : dayDiff;
+  const firstAttachment = attachments[0]?.name ?? null;
+  const exceedsBalance = ctx.live && t?.available != null && days > t.available;
+  const canSubmit = !!t && !exceedsBalance;
 
   const addFiles = (items: AttFile[]) => setAttachments((a) => [...a, ...items].slice(0, 6));
   const removeFile = (i: number) => setAttachments((a) => a.filter((_, idx) => idx !== i));
 
   return (
     <Overlay title="Apply for leave" onClose={closeOverlay}
-      footer={<button onClick={() => submitLeave({ type: t.name, from, to, half, days: half ? 0.5 : 2 })} style={primaryBtn}>Submit request</button>}>
+      footer={<button disabled={!canSubmit} onClick={() => t && submitLeave({ type: t.name, from: displayDate(fromDate), to: displayDate(half ? fromDate : toDate), half, days, fromDate, toDate: half ? fromDate : toDate, reason, attachment: firstAttachment })} style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.55, cursor: canSubmit ? 'pointer' : 'not-allowed' }}>{exceedsBalance ? 'Exceeds balance' : 'Submit request'}</button>}>
       <label style={fieldLabel}>Leave type</label>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
-        {LEAVE_TYPES.map((lt) => {
-          const on = type === lt.id;
+      {leaveOptions.length === 0 ? (
+        <Card pad={16} style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>No leave balance assigned</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 4 }}>Ask HR to add leave policies for your profile.</div>
+        </Card>
+      ) : (
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        {leaveOptions.map((lt) => {
+          const on = type === lt.name;
           return (
-            <button key={lt.id} onClick={() => setType(lt.id)} style={{
+            <button key={lt.id} onClick={() => setType(lt.name)} style={{
               display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 13px', borderRadius: 999,
               border: on ? '1.5px solid var(--accent)' : '1.5px solid var(--hair)',
               background: on ? 'var(--accent-soft)' : 'var(--card)', cursor: 'pointer',
               color: on ? 'var(--accent)' : 'var(--text-2)', fontWeight: 600, fontSize: 13.5,
             }}>
               <Icon name={lt.icon} size={16} color={on ? 'var(--accent)' : 'var(--text-3)'} />{lt.name}
+              {ctx.live && lt.available != null && lt.allotted != null && <span style={{ fontSize: 11.5, color: on ? 'var(--accent)' : 'var(--text-3)', fontWeight: 700 }}>{fmtDays(lt.available)}/{fmtDays(lt.allotted)}</span>}
             </button>
           );
         })}
       </div>
+      )}
+      {ctx.live && t?.available != null && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, padding: '10px 12px', borderRadius: 'var(--r-card)', background: exceedsBalance ? 'var(--danger-soft)' : 'var(--muted-soft)' }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: exceedsBalance ? 'var(--danger)' : 'var(--text-2)' }}>{fmtDays(t.available)} days available</span>
+          <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 700 }}>Max {fmtDays(t.allotted ?? 0)}</span>
+        </div>
+      )}
 
       <label style={fieldLabel}>Duration</label>
       <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-        <DateField label="From" value={from} />
-        <DateField label="To" value={half ? from : to} dim={half} />
+        <DateField label="From" value={fromDate} onChange={setFromDate} />
+        <DateField label="To" value={half ? fromDate : toDate} onChange={setToDate} dim={half} />
       </div>
       <div onClick={() => setHalf((h) => !h)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 15px', borderRadius: 'var(--r-card)', border: 'var(--card-border)', background: 'var(--card)', cursor: 'pointer', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -324,15 +387,18 @@ function UploadSheet({ attachments, onAdd, onRemove, onClose }: { attachments: A
   );
 }
 
-function DateField({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
+function DateField({ label, value, dim, onChange }: { label: string; value: string; dim?: boolean; onChange: (value: string) => void }) {
   return (
-    <div style={{ flex: 1, opacity: dim ? 0.45 : 1, borderRadius: 'var(--r-card)', border: 'var(--card-border)', background: 'var(--card)', padding: '11px 14px' }}>
+    <label style={{ flex: 1, opacity: dim ? 0.45 : 1, borderRadius: 'var(--r-card)', border: 'var(--card-border)', background: 'var(--card)', padding: '9px 12px', display: 'block' }}>
       <div style={{ fontSize: 11.5, color: 'var(--text-3)', fontWeight: 600 }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
-        <span style={{ fontSize: 15.5, fontWeight: 700, color: 'var(--text-1)' }}>{value}</span>
-        <Icon name="calendar" size={17} color="var(--accent)" />
-      </div>
-    </div>
+      <input
+        type="date"
+        value={value}
+        disabled={dim}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: '100%', marginTop: 2, border: 'none', outline: 'none', background: 'transparent', color: 'var(--text-1)', fontFamily: 'inherit', fontSize: 14, fontWeight: 700 }}
+      />
+    </label>
   );
 }
 

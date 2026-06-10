@@ -1,22 +1,38 @@
 import { supabase } from './supabase';
+import { formatAppDate } from './networkTime';
 
 export type Employee = {
   id: string; code: string; name: string; dept: string | null; designation: string | null;
   manager: string | null; type: string | null; status: string; email: string | null;
-  phone: string | null; joined: string | null;
+  phone: string | null; joined: string | null; profile_id?: string | null;
 };
 
 export type LeaveRow = {
-  id: string; emp: string | null; code: string | null; dept: string | null; type: string;
+  id: string; org_id: string; employee_id: string | null; emp: string | null; code: string | null; dept: string | null; type: string;
   from_date: string | null; to_date: string | null; days: number; half: boolean;
   reason: string | null; attachment: string | null; status: string; stage: string; applied_at: string;
 };
 
 export type Dept = { id: string; name: string };
 export type Holiday = { id: string; name: string; date: string; type: string; description: string | null };
+export type LeaveType = { id: string; name: string; quota: number; color: string | null };
+export type LeaveBalance = { type: string; allotted: number; used: number; pending: number; available: number; color?: string | null };
+export type AttendanceRow = {
+  id: string; org_id: string; employee_id: string | null; day: string; check_in_at: string | null;
+  check_out_at: string | null; status: string; work_seconds: number | null; location: string | null;
+  selfie_url: string | null; ip: string | null; device: string | null; created_at: string;
+};
 
 export type Stats = {
   employees: number; active: number; departments: number; pendingLeave: number; presentToday: number;
+};
+
+export type ProfileLookup = {
+  id: string;
+  org_id: string | null;
+  full_name?: string | null;
+  email: string | null;
+  employee_id?: string | null;
 };
 
 function db() {
@@ -24,6 +40,41 @@ function db() {
   return supabase;
 }
 
+const isoDate = (d: Date) => formatAppDate(d);
+const num = (value: unknown) => Number(value ?? 0);
+const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+type AttendanceDetails = Partial<Pick<AttendanceRow, 'location' | 'selfie_url' | 'ip' | 'device'>> & {
+  checkedAt?: string;
+};
+
+function isMissingRpcError(error: unknown) {
+  const e = error as { code?: string; message?: string; details?: string };
+  const text = `${e?.message ?? ''} ${e?.details ?? ''}`;
+  return e?.code === 'PGRST202' || /function .* does not exist|could not find the function/i.test(text);
+}
+
+function mapBalance(row: Record<string, unknown>): LeaveBalance {
+  const allotted = num(row.allotted);
+  const used = num(row.used);
+  const pending = num(row.pending);
+  return {
+    type: String(row.type),
+    allotted,
+    used,
+    pending,
+    available: Math.max(0, allotted - used - pending),
+    color: (row.color as string | null | undefined) ?? null,
+  };
+}
+
+async function nextEmployeeCode(orgId: string): Promise<string> {
+  const { count, error } = await db()
+    .from('employees')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', orgId);
+  if (error) throw error;
+  return `EMP-${String((count ?? 0) + 1).padStart(3, '0')}`;
+}
 // ── Employees ─────────────────────────────────────────────────────────
 export async function listEmployees(): Promise<Employee[]> {
   const { data, error } = await db().from('employees').select('*').order('created_at', { ascending: true });
@@ -41,11 +92,66 @@ export async function deleteEmployee(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function getMyEmployee(profile: ProfileLookup): Promise<Employee | null> {
+  if (!profile.org_id) return null;
+  const orgId = profile.org_id;
+
+  const findOne = async (column: string, value: string) => {
+    const { data, error } = await db()
+      .from('employees')
+      .select('*')
+      .eq('org_id', orgId)
+      .eq(column, value)
+      .limit(1);
+    if (error) throw error;
+    return ((data ?? [])[0] as Employee | undefined) ?? null;
+  };
+
+  if (profile.employee_id) {
+    const byEmployeeId = await findOne('id', profile.employee_id);
+    if (byEmployeeId) return byEmployeeId;
+  }
+
+  const byProfileId = await findOne('profile_id', profile.id);
+  if (byProfileId) return byProfileId;
+
+  if (profile.email) return findOne('email', profile.email);
+  return null;
+}
+
+export async function ensureMyEmployee(profile: ProfileLookup): Promise<Employee | null> {
+  if (!profile.org_id) return null;
+  const existing = await getMyEmployee(profile);
+  if (existing) return existing;
+
+  const row = {
+    org_id: profile.org_id,
+    code: await nextEmployeeCode(profile.org_id),
+    name: profile.full_name || profile.email || 'Employee',
+    email: profile.email,
+    profile_id: profile.id,
+    type: 'Full-time',
+    status: 'Active',
+    joined: isoDate(new Date()),
+  };
+  const { data, error } = await db().from('employees').insert(row).select('*').single();
+  if (error) throw error;
+  const employee = data as Employee;
+  await db().from('profiles').update({ employee_id: employee.id }).eq('id', profile.id);
+  return employee;
+}
+
 // ── Departments ───────────────────────────────────────────────────────
 export async function listDepartments(): Promise<Dept[]> {
   const { data, error } = await db().from('departments').select('id,name').order('name');
   if (error) throw error;
   return (data ?? []) as Dept[];
+}
+
+export async function listLeaveTypes(): Promise<LeaveType[]> {
+  const { data, error } = await db().from('leave_types').select('id,name,quota,color').order('name');
+  if (error) throw error;
+  return (data ?? []) as LeaveType[];
 }
 
 // ── Organization + onboarding writes ──────────────────────────────────
@@ -63,14 +169,26 @@ export async function updateOrganization(orgId: string, fields: Partial<OrgRow>)
 }
 
 export async function addDepartments(orgId: string, names: string[]): Promise<void> {
-  const rows = names.map((n) => n.trim()).filter(Boolean).map((name) => ({ org_id: orgId, name }));
+  const clean = Array.from(new Set(names.map((n) => n.trim()).filter(Boolean)));
+  if (!clean.length) return;
+  const { data, error: readError } = await db().from('departments').select('name').eq('org_id', orgId);
+  if (readError) throw readError;
+  const existing = new Set((data ?? []).map((row) => String(row.name).toLowerCase()));
+  const rows = clean.filter((name) => !existing.has(name.toLowerCase())).map((name) => ({ org_id: orgId, name }));
   if (!rows.length) return;
   const { error } = await db().from('departments').insert(rows);
   if (error) throw error;
 }
 
 export async function addLeaveTypes(orgId: string, types: { name: string; quota: number }[]): Promise<void> {
-  const rows = types.filter((t) => t.name.trim()).map((t) => ({ org_id: orgId, name: t.name.trim(), quota: t.quota }));
+  const clean = types
+    .map((t) => ({ name: t.name.trim(), quota: t.quota }))
+    .filter((t) => t.name);
+  if (!clean.length) return;
+  const { data, error: readError } = await db().from('leave_types').select('name').eq('org_id', orgId);
+  if (readError) throw readError;
+  const existing = new Set((data ?? []).map((row) => String(row.name).toLowerCase()));
+  const rows = clean.filter((t) => !existing.has(t.name.toLowerCase())).map((t) => ({ org_id: orgId, name: t.name, quota: t.quota }));
   if (!rows.length) return;
   const { error } = await db().from('leave_types').insert(rows);
   if (error) throw error;
@@ -78,12 +196,15 @@ export async function addLeaveTypes(orgId: string, types: { name: string; quota:
 
 export async function addEmployees(orgId: string, emps: { name: string; email: string; dept: string; designation: string; manager: string }[]): Promise<void> {
   const valid = emps.filter((e) => e.name.trim());
+  if (!valid.length) return;
+  const { count, error: countError } = await db().from('employees').select('id', { count: 'exact', head: true }).eq('org_id', orgId);
+  if (countError) throw countError;
+  const start = count ?? 0;
   const rows = valid.map((e, i) => ({
-    org_id: orgId, code: `EMP-${String(i + 1).padStart(3, '0')}`,
+    org_id: orgId, code: `EMP-${String(start + i + 1).padStart(3, '0')}`,
     name: e.name.trim(), email: e.email.trim() || null, dept: e.dept || null,
     designation: e.designation || null, manager: e.manager || null, type: 'Full-time', status: 'Active',
   }));
-  if (!rows.length) return;
   const { error } = await db().from('employees').insert(rows);
   if (error) throw error;
 }
@@ -95,6 +216,16 @@ export async function listHolidays(): Promise<Holiday[]> {
   return (data ?? []) as Holiday[];
 }
 
+export async function addHoliday(orgId: string, h: Omit<Holiday, 'id'>): Promise<void> {
+  const { error } = await db().from('holidays').insert({ org_id: orgId, ...h });
+  if (error) throw error;
+}
+
+export async function deleteHoliday(id: string): Promise<void> {
+  const { error } = await db().from('holidays').delete().eq('id', id);
+  if (error) throw error;
+}
+
 // ── Leave requests + approval workflow ────────────────────────────────
 export async function listLeave(): Promise<LeaveRow[]> {
   const { data, error } = await db().from('leave_requests').select('*').order('applied_at', { ascending: false });
@@ -102,18 +233,59 @@ export async function listLeave(): Promise<LeaveRow[]> {
   return (data ?? []) as LeaveRow[];
 }
 
+function reportsTo(employee: Employee, manager: Employee | null, profile: ProfileLookup) {
+  const managerNames = [manager?.name, profile.full_name, profile.email]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+  return !!employee.manager && managerNames.includes(employee.manager.trim().toLowerCase()) && employee.id !== manager?.id;
+}
+
+export async function listMyTeamLeave(profile: ProfileLookup, manager: Employee | null): Promise<LeaveRow[]> {
+  const rpc = await db().rpc('get_my_team_leave_requests');
+  if (!rpc.error) return (rpc.data ?? []) as LeaveRow[];
+  if (!isMissingRpcError(rpc.error)) throw rpc.error;
+
+  if (!manager && !profile.full_name && !profile.email) return [];
+  const [leaveRows, employees] = await Promise.all([listLeave(), listEmployees()]);
+  const team = new Map(
+    employees
+      .filter((employee) => reportsTo(employee, manager, profile))
+      .flatMap((employee) => [[employee.id, employee], [employee.code, employee], [employee.name, employee]])
+  );
+  return leaveRows.filter((row) => {
+    const keys = [row.employee_id, row.code, row.emp].filter(Boolean) as string[];
+    return keys.some((key) => team.has(key));
+  });
+}
+
 export async function decideLeave(row: LeaveRow, action: 'approve' | 'reject'): Promise<void> {
+  const rpc = await db().rpc('decide_leave_request', { p_request_id: row.id, p_action: action });
+  if (!rpc.error) return;
+  if (!isMissingRpcError(rpc.error)) throw rpc.error;
+
   let patch: Record<string, unknown>;
   if (action === 'reject') {
     patch = { status: 'Rejected', stage: 'reject', decided_at: new Date().toISOString() };
   } else if (row.stage === 'manager') {
-    // manager approval forwards to HR
+    // Manager approval forwards to HR.
     patch = { stage: 'hr', decided_at: new Date().toISOString() };
   } else {
     patch = { status: 'Approved', stage: 'done', decided_at: new Date().toISOString() };
   }
   const { error } = await db().from('leave_requests').update(patch).eq('id', row.id);
   if (error) throw error;
+
+  if (row.employee_id && row.org_id) {
+    if (action === 'reject') await adjustLeaveBalance(row.org_id, row.employee_id, row.type, { pending: -num(row.days) });
+    if (action === 'approve' && row.stage !== 'manager') await adjustLeaveBalance(row.org_id, row.employee_id, row.type, { pending: -num(row.days), used: num(row.days) });
+  }
+}
+
+export async function decideTeamLeave(row: LeaveRow, action: 'approve' | 'reject'): Promise<void> {
+  const rpc = await db().rpc('decide_team_leave_request', { p_request_id: row.id, p_action: action });
+  if (!rpc.error) return;
+  if (!isMissingRpcError(rpc.error)) throw rpc.error;
+  await decideLeave(row, action);
 }
 
 // ── Dashboard stats ───────────────────────────────────────────────────
@@ -141,6 +313,12 @@ export async function hasEmployees(): Promise<boolean> {
 }
 
 const SAMPLE_DEPTS = ['Engineering', 'Design', 'Sales', 'Operations', 'Finance'];
+const SAMPLE_LEAVE_TYPES = [
+  { name: 'Casual', quota: 12 },
+  { name: 'Sick', quota: 8 },
+  { name: 'Paid', quota: 15 },
+  { name: 'Work from home', quota: 24 },
+];
 const SAMPLE_EMP = [
   { code: 'CTK-2041', name: 'Aarav Mehta', dept: 'Design', designation: 'Sr. Product Designer', manager: 'Priya Nair', type: 'Full-time', status: 'Active', email: 'aarav.mehta@acme.co', phone: '+91 98860 41122', joined: '2022-03-14' },
   { code: 'CTK-1088', name: 'Priya Nair', dept: 'Design', designation: 'Design Lead', manager: 'Rohan Kapoor', type: 'Full-time', status: 'Active', email: 'priya.nair@acme.co', phone: '+91 99001 23410', joined: '2021-01-02' },
@@ -168,43 +346,290 @@ const SAMPLE_HOLIDAYS = [
 
 export async function seedSampleData(orgId: string): Promise<void> {
   const s = db();
-  await s.from('departments').insert(SAMPLE_DEPTS.map((name) => ({ org_id: orgId, name })));
-  await s.from('employees').insert(SAMPLE_EMP.map((e) => ({ org_id: orgId, ...e })));
-  await s.from('leave_requests').insert(SAMPLE_LEAVE.map((l) => ({ org_id: orgId, ...l })));
-  await s.from('holidays').insert(SAMPLE_HOLIDAYS.map((h) => ({ org_id: orgId, ...h })));
+  await addDepartments(orgId, SAMPLE_DEPTS);
+  await addLeaveTypes(orgId, SAMPLE_LEAVE_TYPES);
+
+  const { data: employees, error: empError } = await s
+    .from('employees')
+    .insert(SAMPLE_EMP.map((e) => ({ org_id: orgId, ...e })))
+    .select('*');
+  if (empError) throw empError;
+
+  const byCode = new Map((employees ?? []).map((e) => [e.code, e as Employee]));
+  const leaveRows = SAMPLE_LEAVE.map((l) => ({
+    org_id: orgId,
+    employee_id: l.code ? byCode.get(l.code)?.id ?? null : null,
+    ...l,
+  }));
+  const { error: leaveError } = await s.from('leave_requests').insert(leaveRows);
+  if (leaveError) throw leaveError;
+
+  const usage = new Map<string, { used: number; pending: number }>();
+  for (const l of SAMPLE_LEAVE) {
+    const key = `${l.code}:${l.type}`;
+    const current = usage.get(key) ?? { used: 0, pending: 0 };
+    if (l.status === 'Approved') current.used += Number(l.days);
+    if (l.status === 'Pending') current.pending += Number(l.days);
+    usage.set(key, current);
+  }
+  const balanceRows = (employees ?? []).flatMap((e) => SAMPLE_LEAVE_TYPES.map((t) => {
+    const current = usage.get(`${e.code}:${t.name}`) ?? { used: 0, pending: 0 };
+    return { org_id: orgId, employee_id: e.id, code: e.code, name: e.name, type: t.name, allotted: t.quota, used: current.used, pending: current.pending };
+  }));
+  if (balanceRows.length) {
+    const { data: existing, error: existingError } = await s
+      .from('leave_balances')
+      .select('employee_id,type')
+      .eq('org_id', orgId);
+    if (existingError) throw existingError;
+    const existingKeys = new Set((existing ?? []).map((row) => `${row.employee_id}:${String(row.type).toLowerCase()}`));
+    const missing = balanceRows.filter((row) => !existingKeys.has(`${row.employee_id}:${row.type.toLowerCase()}`));
+    const { error } = missing.length ? await s.from('leave_balances').insert(missing) : { error: null };
+    if (error) throw error;
+  }
+
+  const today = new Date();
+  const attendanceRows = (employees ?? [])
+    .filter((e) => e.status === 'Active')
+    .flatMap((e, employeeIndex) => Array.from({ length: 7 }, (_, dayIndex) => {
+      const day = new Date(today);
+      day.setDate(today.getDate() - dayIndex);
+      const isWeekend = [0, 6].includes(day.getDay());
+      const checkIn = new Date(day);
+      checkIn.setHours(9, 20 + ((employeeIndex + dayIndex) % 25), 0, 0);
+      const checkOut = new Date(day);
+      checkOut.setHours(isWeekend ? 13 : 18, isWeekend ? 30 : 20 + ((employeeIndex + dayIndex) % 25), 0, 0);
+      return {
+        org_id: orgId,
+        employee_id: e.id,
+        day: isoDate(day),
+        check_in_at: checkIn.toISOString(),
+        check_out_at: dayIndex === 0 ? null : checkOut.toISOString(),
+        status: isWeekend ? 'WFH' : ((employeeIndex + dayIndex) % 6 === 0 ? 'Late' : 'Present'),
+        work_seconds: dayIndex === 0 ? 0 : Math.max(0, Math.round((checkOut.getTime() - checkIn.getTime()) / 1000)),
+        location: 'HQ Bengaluru',
+      };
+    }));
+  if (attendanceRows.length) {
+    const { error } = await s.from('attendance').insert(attendanceRows);
+    if (error) throw error;
+  }
+
+  const { error: holidayError } = await s.from('holidays').insert(SAMPLE_HOLIDAYS.map((h) => ({ org_id: orgId, ...h })));
+  if (holidayError) throw holidayError;
 }
 
-// ── Employee self-service (attendance + own leave) ─────────────────────
-const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+// Employee self-service: attendance, own leave, and balances.
+function leaveOwnerQuery(profile: ProfileLookup, employee: Employee | null) {
+  const q = db().from('leave_requests').select('*').order('applied_at', { ascending: false });
+  if (employee?.id) return q.eq('employee_id', employee.id);
+  if (employee?.name) return q.eq('emp', employee.name);
+  if (profile.email) return q.eq('emp', profile.full_name || profile.email);
+  return q.eq('emp', profile.full_name || '');
+}
 
-export async function applyLeave(orgId: string, p: { empName: string; type: string; days: number; half: boolean; reason: string }): Promise<void> {
-  const from = new Date();
-  const to = new Date();
-  to.setDate(to.getDate() + Math.max(0, Math.ceil(p.days) - 1));
-  const { error } = await db().from('leave_requests').insert({
-    org_id: orgId, emp: p.empName, type: p.type, from_date: isoDate(from), to_date: isoDate(to),
-    days: p.days, half: p.half, reason: p.reason, status: 'Pending', stage: 'manager',
-  });
+async function ensureEmployeeLeaveBalancesClient(orgId: string, employee: Employee): Promise<void> {
+  const [types, existing] = await Promise.all([
+    listLeaveTypes(),
+    db()
+      .from('leave_balances')
+      .select('type')
+      .eq('org_id', orgId)
+      .eq('employee_id', employee.id),
+  ]);
+  if (existing.error) throw existing.error;
+  const seen = new Set((existing.data ?? []).map((row) => String(row.type).toLowerCase()));
+  const rows = types
+    .filter((t) => !seen.has(t.name.toLowerCase()))
+    .map((t) => ({
+      org_id: orgId,
+      employee_id: employee.id,
+      code: employee.code,
+      name: employee.name,
+      type: t.name,
+      allotted: num(t.quota),
+      used: 0,
+      pending: 0,
+    }));
+  if (!rows.length) return;
+  const { error } = await db().from('leave_balances').insert(rows);
   if (error) throw error;
 }
 
-export async function myLeave(empName: string): Promise<LeaveRow[]> {
-  const { data, error } = await db().from('leave_requests').select('*').eq('emp', empName).order('applied_at', { ascending: false });
+async function adjustLeaveBalance(orgId: string, employeeId: string, type: string, delta: { used?: number; pending?: number }) {
+  const { data, error } = await db()
+    .from('leave_balances')
+    .select('id,used,pending')
+    .eq('org_id', orgId)
+    .eq('employee_id', employeeId)
+    .eq('type', type)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return;
+  const { error: updateError } = await db().from('leave_balances').update({
+    used: Math.max(0, num(data.used) + num(delta.used)),
+    pending: Math.max(0, num(data.pending) + num(delta.pending)),
+  }).eq('id', data.id);
+  if (updateError) throw updateError;
+}
+
+export async function applyLeave(orgId: string, p: {
+  employee: Employee | null;
+  empName: string;
+  type: string;
+  fromDate: string;
+  toDate: string;
+  days: number;
+  half: boolean;
+  reason: string;
+  attachment?: string | null;
+}): Promise<void> {
+  if (p.employee?.id) {
+    const rpc = await db().rpc('apply_leave_request', {
+      p_type: p.type,
+      p_from_date: p.fromDate,
+      p_to_date: p.half ? p.fromDate : p.toDate,
+      p_days: p.days,
+      p_half: p.half,
+      p_reason: p.reason || null,
+      p_attachment: p.attachment || null,
+    });
+    if (!rpc.error) return;
+    if (!isMissingRpcError(rpc.error)) throw rpc.error;
+
+    const balances = await myLeaveBalances(orgId, p.employee);
+    const balance = balances.find((b) => sameText(b.type, p.type));
+    if (!balance) throw new Error('This leave type is not configured for your profile.');
+    if (num(p.days) > balance.available) {
+      throw new Error(`Only ${balance.available} ${balance.type} leave day${balance.available === 1 ? '' : 's'} are available.`);
+    }
+  }
+
+  const { error } = await db().from('leave_requests').insert({
+    org_id: orgId,
+    employee_id: p.employee?.id ?? null,
+    emp: p.employee?.name || p.empName,
+    code: p.employee?.code ?? null,
+    dept: p.employee?.dept ?? null,
+    type: p.type,
+    from_date: p.fromDate,
+    to_date: p.half ? p.fromDate : p.toDate,
+    days: p.days,
+    half: p.half,
+    reason: p.reason || null,
+    attachment: p.attachment || null,
+    status: 'Pending',
+    stage: 'manager',
+  });
+  if (error) throw error;
+  if (p.employee?.id) await adjustLeaveBalance(orgId, p.employee.id, p.type, { pending: p.days });
+}
+
+export async function myLeave(profile: ProfileLookup, employee: Employee | null): Promise<LeaveRow[]> {
+  const { data, error } = await leaveOwnerQuery(profile, employee);
   if (error) throw error;
   return (data ?? []) as LeaveRow[];
 }
 
-export async function checkIn(orgId: string): Promise<string> {
-  const { data, error } = await db().from('attendance').insert({
-    org_id: orgId, day: isoDate(new Date()), check_in_at: new Date().toISOString(), status: 'Present',
-  }).select('id').single();
-  if (error) throw error;
-  return (data as { id: string }).id;
+export async function myLeaveBalances(orgId: string, employee: Employee | null, leaveRows?: LeaveRow[]): Promise<LeaveBalance[]> {
+  const s = db();
+  if (employee?.id) {
+    const rpc = await s.rpc('get_my_leave_balances');
+    if (!rpc.error) return ((rpc.data ?? []) as Record<string, unknown>[]).map(mapBalance);
+    if (!isMissingRpcError(rpc.error)) throw rpc.error;
+
+    await ensureEmployeeLeaveBalancesClient(orgId, employee).catch(() => undefined);
+    const [balances, types] = await Promise.all([
+      s.from('leave_balances').select('*').eq('org_id', orgId).eq('employee_id', employee.id),
+      listLeaveTypes(),
+    ]);
+    const { data, error } = balances;
+    if (error) throw error;
+    if ((data ?? []).length) {
+      const colorByType = new Map(types.map((t) => [t.name.toLowerCase(), t.color]));
+      return (data ?? []).map((row) => mapBalance({ ...row, color: colorByType.get(String(row.type).toLowerCase()) ?? null }));
+    }
+  }
+
+  const [types, rows] = await Promise.all([
+    listLeaveTypes(),
+    leaveRows ? Promise.resolve(leaveRows) : employee ? myLeave({ id: '', org_id: orgId, full_name: employee.name, email: employee.email }, employee) : Promise.resolve([]),
+  ]);
+  return types
+    .map((t) => {
+      const relevant = rows.filter((r) => r.type === t.name);
+      const used = relevant.filter((r) => r.status === 'Approved').reduce((sum, r) => sum + num(r.days), 0);
+      const pending = relevant.filter((r) => r.status === 'Pending').reduce((sum, r) => sum + num(r.days), 0);
+      return { type: t.name, allotted: num(t.quota), used, pending, available: Math.max(0, num(t.quota) - used - pending), color: t.color };
+    });
 }
 
-export async function checkOut(attendanceId: string, workSeconds: number): Promise<void> {
-  const { error } = await db().from('attendance').update({
-    check_out_at: new Date().toISOString(), work_seconds: Math.round(workSeconds),
-  }).eq('id', attendanceId);
+export async function listMyAttendance(orgId: string, employee: Employee | null, limit = 45): Promise<AttendanceRow[]> {
+  if (!employee?.id) return [];
+  const { data, error } = await db()
+    .from('attendance')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('employee_id', employee.id)
+    .order('day', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as AttendanceRow[];
+}
+
+export async function getTodayAttendance(orgId: string, employee: Employee | null, day = isoDate(new Date())): Promise<AttendanceRow | null> {
+  if (!employee?.id) return null;
+  const { data, error } = await db()
+    .from('attendance')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('employee_id', employee.id)
+    .eq('day', day)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as AttendanceRow | null) ?? null;
+}
+
+export async function checkIn(orgId: string, employee: Employee | null, details?: AttendanceDetails): Promise<AttendanceRow> {
+  const checkedAt = details?.checkedAt ? new Date(details.checkedAt) : new Date();
+  const day = isoDate(checkedAt);
+  const auditDetails = {
+    location: details?.location ?? null,
+    selfie_url: details?.selfie_url ?? null,
+    ip: details?.ip ?? null,
+    device: details?.device ?? null,
+  };
+  const existing = await getTodayAttendance(orgId, employee, day);
+  if (existing) {
+    const patch = Object.fromEntries(Object.entries(auditDetails).filter(([, value]) => value));
+    if (!Object.keys(patch).length) return existing;
+    const { data, error } = await db().from('attendance').update(patch).eq('id', existing.id).select('*').single();
+    if (error) throw error;
+    return data as AttendanceRow;
+  }
+  const { data, error } = await db().from('attendance').insert({
+    org_id: orgId,
+    employee_id: employee?.id ?? null,
+    day,
+    check_in_at: checkedAt.toISOString(),
+    status: 'Present',
+    ...auditDetails,
+  }).select('*').single();
+  if (error) throw error;
+  return data as AttendanceRow;
+}
+
+export async function checkOut(attendanceId: string, workSeconds: number, details?: AttendanceDetails): Promise<void> {
+  const checkedAt = details?.checkedAt ? new Date(details.checkedAt) : new Date();
+  const patch = {
+    check_out_at: checkedAt.toISOString(),
+    work_seconds: Math.round(workSeconds),
+    ...Object.fromEntries(Object.entries({
+      location: details?.location,
+      ip: details?.ip,
+      device: details?.device,
+    }).filter(([, value]) => value)),
+  };
+  const { error } = await db().from('attendance').update(patch).eq('id', attendanceId);
   if (error) throw error;
 }

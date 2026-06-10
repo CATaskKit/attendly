@@ -3,6 +3,8 @@
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
+  readonly VITE_TIME_API_URL?: string;
+  readonly VITE_IP_LOOKUP_URL?: string;
 }
 
 interface ImportMeta {

@@ -6,10 +6,11 @@ import {
   AIcon, AAvatar, ACard, APill, ABadge, KPI, Segmented, AToast, BtnGhost, BtnPrimary, PageHead, Spinner,
 } from './ui';
 import {
-  listEmployees, addEmployee, deleteEmployee, listLeave, decideLeave, listHolidays,
-  dashboardStats, hasEmployees, seedSampleData,
+  listEmployees, addEmployee, deleteEmployee, listLeave, decideLeave, listHolidays, addHoliday, deleteHoliday,
+  dashboardStats, hasEmployees, seedSampleData, getOrganization,
   type Employee, type LeaveRow, type Holiday, type Stats,
 } from '../lib/api';
+import { fetchExportData, downloadWorkbook, SHEETS, type ExportData } from '../lib/export';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -17,12 +18,13 @@ const fmtRange = (a: string | null, b: string | null) => {
   return a === b ? f(a) : `${f(a)} – ${f(b)}`;
 };
 
-type Page = 'dashboard' | 'approvals' | 'employees' | 'holidays';
+type Page = 'dashboard' | 'approvals' | 'employees' | 'holidays' | 'reports';
 const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'dashboard', icon: 'grid', label: 'Dashboard' },
   { id: 'approvals', icon: 'inbox', label: 'Leave Approvals' },
   { id: 'employees', icon: 'users', label: 'Employees' },
   { id: 'holidays', icon: 'calendar', label: 'Holidays' },
+  { id: 'reports', icon: 'download', label: 'Reports & export' },
 ];
 
 export default function AdminApp() {
@@ -39,6 +41,7 @@ export default function AdminApp() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [toast, setToast] = useState<{ text: string; tone: string; icon: string } | null>(null);
   const [seeding, setSeeding] = useState(false);
+  const [search, setSearch] = useState('');
 
   const fire = (text: string, tone = 'green', icon = 'checkCircle') => { setToast({ text, tone, icon }); setTimeout(() => setToast(null), 2600); };
 
@@ -84,6 +87,21 @@ export default function AdminApp() {
     catch (e) { console.error(e); fire('Delete failed', 'red', 'xCircle'); }
   };
 
+  const onAddHoliday = async (h: Omit<Holiday, 'id'>) => {
+    if (!orgId) return;
+    try { await addHoliday(orgId, h); await reload(); fire('Holiday added'); }
+    catch (e) { console.error(e); fire('Could not add holiday', 'red', 'xCircle'); }
+  };
+  const onDeleteHoliday = async (id: string) => {
+    try { await deleteHoliday(id); await reload(); fire('Holiday removed', 'red', 'trash'); }
+    catch (e) { console.error(e); fire('Delete failed', 'red', 'xCircle'); }
+  };
+
+  const q = search.trim().toLowerCase();
+  const matches = (...values: Array<string | null | undefined>) => !q || values.some((v) => String(v ?? '').toLowerCase().includes(q));
+  const shownEmployees = employees.filter((e) => matches(e.name, e.code, e.dept, e.designation, e.manager, e.email));
+  const shownLeave = leave.filter((l) => matches(l.emp, l.code, l.dept, l.type, l.status, l.reason));
+  const shownHolidays = holidays.filter((h) => matches(h.name, h.type, h.description));
   const pendingCount = leave.filter((l) => l.status === 'Pending').length;
 
   return (
@@ -133,7 +151,7 @@ export default function AdminApp() {
         <header style={{ height: 66, flexShrink: 0, background: 'var(--panel)', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 16, padding: '0 28px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 40, padding: '0 14px', borderRadius: 11, background: 'var(--bg)', width: 320, maxWidth: '40%' }}>
             <AIcon name="search" size={18} color="var(--ink-3)" />
-            <input placeholder="Search employees, requests…" style={{ border: 'none', outline: 'none', background: 'none', fontSize: 13.5, color: 'var(--ink-1)', width: '100%' }} />
+            <input placeholder="Search employees, requests..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ border: 'none', outline: 'none', background: 'none', fontSize: 13.5, color: 'var(--ink-1)', width: '100%' }} />
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
             <span style={{ fontSize: 13, color: 'var(--ink-3)', fontWeight: 600 }}>{new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
@@ -148,13 +166,15 @@ export default function AdminApp() {
             : employees.length === 0 && leave.length === 0 ? (
               <EmptyState seeding={seeding} canSeed={canManage} onSeed={onSeed} />
             ) : page === 'dashboard' ? (
-              <Dashboard stats={stats} leave={leave} onGo={setPage} onDecide={onDecide} />
+              <Dashboard stats={stats} leave={shownLeave} onGo={setPage} onDecide={onDecide} />
             ) : page === 'approvals' ? (
-              <Approvals leave={leave} role={role} onDecide={onDecide} />
+              <Approvals leave={shownLeave} role={role} onDecide={onDecide} />
             ) : page === 'employees' ? (
-              <Employees employees={employees} canManage={canManage} onAdd={onAddEmployee} onDelete={onDeleteEmployee} />
+              <Employees employees={shownEmployees} canManage={canManage} onAdd={onAddEmployee} onDelete={onDeleteEmployee} />
+            ) : page === 'holidays' ? (
+              <Holidays holidays={shownHolidays} canManage={canManage} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
             ) : (
-              <Holidays holidays={holidays} />
+              <Reports orgId={orgId} onToast={fire} />
             )}
         </main>
       </div>
@@ -233,7 +253,7 @@ function Approvals({ leave, role, onDecide }: { leave: LeaveRow[]; role: string;
   const [tab, setTab] = useState('Pending');
   const filtered = leave.filter((r) => (tab === 'All' ? true : r.status === tab));
   const pendingCount = leave.filter((r) => r.status === 'Pending').length;
-  const canDecide = role === 'owner' || role === 'hr' || role === 'manager';
+  const canDecideRequest = (r: LeaveRow) => role === 'manager' ? r.stage === 'manager' : (role === 'owner' || role === 'hr') && r.stage !== 'manager';
   return (
     <div>
       <PageHead title="Leave Approvals" sub={`${pendingCount} request${pendingCount === 1 ? '' : 's'} awaiting action`} />
@@ -261,7 +281,7 @@ function Approvals({ leave, role, onDecide }: { leave: LeaveRow[]; role: string;
               </div>
               {r.reason && <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.45, marginTop: 10 }}>{r.reason}</div>}
               {r.status === 'Pending' ? (
-                canDecide && (
+                canDecideRequest(r) && (
                   <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
                     <button onClick={() => onDecide(r, 'reject')} style={{ flex: 1, height: 42, borderRadius: 11, border: '1.5px solid var(--red)', background: 'var(--panel)', color: 'var(--red)', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><AIcon name="x" size={17} color="var(--red)" sw={2.2} />Reject</button>
                     <button onClick={() => onDecide(r, 'approve')} style={{ flex: 1.6, height: 42, borderRadius: 11, border: 'none', background: 'var(--green)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><AIcon name="check" size={17} color="#fff" sw={2.4} />{r.stage === 'manager' ? 'Approve → HR' : 'Approve'}</button>
@@ -352,11 +372,14 @@ function AddEmployeeModal({ onClose, onSave }: { onClose: () => void; onSave: (e
 }
 
 // ── Holidays ──────────────────────────────────────────────────────────
-function Holidays({ holidays }: { holidays: Holiday[] }) {
+function Holidays({ holidays, canManage, onAdd, onDelete }: { holidays: Holiday[]; canManage: boolean; onAdd: (h: Omit<Holiday, 'id'>) => void; onDelete: (id: string) => void }) {
+  const [adding, setAdding] = useState(false);
   const tone: Record<string, 'accent' | 'purple' | 'amber'> = { National: 'accent', Festival: 'purple', Optional: 'amber' };
   return (
     <div>
-      <PageHead title="Holidays" sub={`${holidays.length} holidays`} />
+      <PageHead title="Holidays" sub={`${holidays.length} holidays`}>
+        {canManage && <BtnPrimary icon="plus" onClick={() => setAdding(true)}>Add holiday</BtnPrimary>}
+      </PageHead>
       {holidays.length === 0 ? (
         <ACard style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>No holidays yet.</ACard>
       ) : (
@@ -369,12 +392,119 @@ function Holidays({ holidays }: { holidays: Holiday[] }) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>{h.name}</div>
-                <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>{new Date(h.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })}{h.description ? ` · ${h.description}` : ''}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>{new Date(h.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })}{h.description ? ` - ${h.description}` : ''}</div>
               </div>
               <APill tone={tone[h.type] || 'neutral'}>{h.type}</APill>
+              {canManage && <button onClick={() => onDelete(h.id)} title="Remove" style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 6 }}><AIcon name="trash" size={17} color="var(--ink-3)" /></button>}
             </div>
           ))}
         </ACard>
+      )}
+      {adding && <AddHolidayModal onClose={() => setAdding(false)} onSave={(h) => { onAdd(h); setAdding(false); }} />}
+    </div>
+  );
+}
+
+function AddHolidayModal({ onClose, onSave }: { onClose: () => void; onSave: (h: Omit<Holiday, 'id'>) => void }) {
+  const [f, setF] = useState<Omit<Holiday, 'id'>>({ name: '', date: new Date().toISOString().slice(0, 10), type: 'National', description: '' });
+  const input: CSSProperties = { width: '100%', boxSizing: 'border-box', height: 42, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink-1)', outline: 'none' };
+  const lbl: CSSProperties = { display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink-2)', marginBottom: 6 };
+  const update = (k: keyof Omit<Holiday, 'id'>, v: string) => setF((s) => ({ ...s, [k]: v }));
+  const save = () => { if (!f.name.trim() || !f.date) return; onSave({ ...f, name: f.name.trim(), description: f.description?.trim() || null }); };
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(15,23,34,0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 480, maxWidth: '100%', background: 'var(--panel)', borderRadius: 18, boxShadow: '0 30px 80px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink-1)' }}>Add holiday</div>
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: 'none', background: 'var(--soft)', cursor: 'pointer' }}><AIcon name="x" size={17} color="var(--ink-2)" /></button>
+        </div>
+        <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <label style={{ gridColumn: '1 / -1' }}><span style={lbl}>Name *</span><input style={input} value={f.name} onChange={(e) => update('name', e.target.value)} placeholder="Diwali" /></label>
+          <label><span style={lbl}>Date *</span><input type="date" style={input} value={f.date} onChange={(e) => update('date', e.target.value)} /></label>
+          <label><span style={lbl}>Type</span><select style={{ ...input, appearance: 'none' }} value={f.type} onChange={(e) => update('type', e.target.value)}>{['National', 'Festival', 'Optional'].map((o) => <option key={o}>{o}</option>)}</select></label>
+          <label style={{ gridColumn: '1 / -1' }}><span style={lbl}>Description</span><input style={input} value={f.description || ''} onChange={(e) => update('description', e.target.value)} placeholder="Optional note" /></label>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, padding: '16px 24px', borderTop: '1px solid var(--line)', background: 'var(--bg)' }}>
+          <BtnGhost onClick={onClose}>Cancel</BtnGhost>
+          <BtnPrimary icon="plus" onClick={save}>Add holiday</BtnPrimary>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Reports & export ──────────────────────────────────────────────────
+function Reports({ orgId, onToast }: { orgId: string | null; onToast: (t: string, tone?: string, icon?: string) => void }) {
+  const [data, setData] = useState<ExportData | null>(null);
+  const [orgName, setOrgName] = useState('Attendly');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [d, org] = await Promise.all([fetchExportData(), orgId ? getOrganization(orgId) : Promise.resolve(null)]);
+        if (!active) return;
+        setData(d);
+        if (org) setOrgName(org.display_name || org.name);
+      } catch (e) { console.error(e); }
+    })();
+    return () => { active = false; };
+  }, [orgId]);
+
+  const onDownload = async () => {
+    setBusy(true);
+    try {
+      const d = await fetchExportData();
+      downloadWorkbook(d, orgName);
+      onToast('Workbook downloaded');
+    } catch (e) { console.error(e); onToast('Export failed', 'red', 'xCircle'); }
+    finally { setBusy(false); }
+  };
+
+  const total = data ? SHEETS.reduce((a, s) => a + data[s.key].length, 0) : 0;
+
+  return (
+    <div>
+      <PageHead title="Reports & export" sub="Every record, current as of now — exported to a formatted Excel workbook.">
+        <BtnPrimary icon="download" onClick={onDownload} disabled={busy || !data}>{busy ? 'Building…' : 'Download Excel'}</BtnPrimary>
+      </PageHead>
+
+      {!data ? <Spinner label="Gathering your data…" /> : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 16 }}>
+            {SHEETS.map((s) => (
+              <ACard key={s.key} pad={18} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{ width: 42, height: 42, borderRadius: 11, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <AIcon name={s.icon} size={21} color="var(--accent)" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em', lineHeight: 1 }}>{data[s.key].length}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600, marginTop: 4 }}>{s.name}</div>
+                </div>
+              </ACard>
+            ))}
+          </div>
+
+          <ACard pad={0} style={{ overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px', borderBottom: '1px solid var(--line)' }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Workbook contents</div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>{SHEETS.length + 1} sheets · {total} rows · .xlsx</div>
+              </div>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--green)', background: 'var(--green-soft)', padding: '6px 11px', borderRadius: 8 }}>
+                <AIcon name="download" size={14} color="var(--green)" /> {orgName.replace(/[^a-z0-9]+/gi, '_')}_HR_Export.xlsx
+              </span>
+            </div>
+            {[{ key: 'summary' as const, name: 'Summary', desc: 'Org snapshot & metadata', icon: 'grid', n: '—' }, ...SHEETS.map((s) => ({ ...s, n: String(data[s.key].length) }))].map((s, i, arr) => (
+              <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 22px', borderBottom: i < arr.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><AIcon name={s.icon} size={17} color="var(--accent)" /></div>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-1)' }}>{s.name}</div><div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>{s.desc}</div></div>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--ink-3)', background: 'var(--soft)', padding: '5px 11px', borderRadius: 999 }}>{s.n} {s.n === '—' ? '' : 'rows'}</span>
+              </div>
+            ))}
+          </ACard>
+        </>
       )}
     </div>
   );

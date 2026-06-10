@@ -14,10 +14,7 @@ Until you add Supabase keys, the app keeps working in **demo mode** (the login's
    - **anon public** key → `VITE_SUPABASE_ANON_KEY`
 
 ## 2. Create the database
-Open **SQL Editor → New query**, paste the contents of
-`supabase/migrations/0001_init.sql`, and **Run**. This creates all tables,
-the role enum, Row-Level Security policies (tenant isolation), the
-`create_organization` function, and the new-user trigger.
+Open **SQL Editor -> New query** and run the SQL files in `supabase/migrations/` in order. This creates the tables, roles, Row-Level Security policies, auth trigger, profile fields, and live-flow indexes/constraints.
 
 > Prefer the CLI? `supabase link --project-ref <ref>` then `supabase db push`.
 
@@ -43,19 +40,17 @@ redeploy.
   This signs you up, runs `create_organization`, and makes you the **Owner**.
 - Sign out / back in to confirm real auth.
 
-## What's wired in this phase (Phase 1)
-- Multi-tenant schema + RLS (every row scoped to `org_id`; role enum
-  owner/hr/manager/employee).
-- Real email/password auth, session persistence, protected `/app` route.
-- Owner sign-up that provisions the organization.
+## What's wired
+- Multi-tenant schema + RLS (every row scoped to `org_id`; role enum owner/hr/manager/employee).
+- Real email/password auth, session persistence, password reset, and protected routes.
+- Owner sign-up that provisions the organization and opens onboarding.
+- Admin dashboard, employees, approvals, holidays, reports/export, and onboarding are backed by Supabase.
+- Employee check-in/out, attendance history, leave requests, leave balances, profile details, holidays, and manager approvals are backed by Supabase.
 
 ## Next phases (roadmap)
-- **Phase 2** — restore the admin dashboard, onboarding wizard and reports,
-  wired to live Supabase data with role-gated access.
-- **Phase 3** — Supabase Realtime for live attendance/approvals + a notification
-  center; server-side large `.xlsx` exports via an Edge Function + Storage.
-- **Phase 4** — Stripe per-seat billing, plan gating, and production hardening
-  (custom domain, backups, rate limits, security review).
+- Supabase Realtime for live attendance/approvals + a notification center.
+- Server-side large `.xlsx` exports via an Edge Function + Storage.
+- Stripe per-seat billing, plan gating, and production hardening.
 
 ## Security notes
 - The **anon key is public** and safe in the browser — security comes from RLS.

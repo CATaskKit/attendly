@@ -65,21 +65,24 @@ function Field({
   );
 }
 
-type Mode = 'signin' | 'signup';
+type Mode = 'signin' | 'signup' | 'forgot' | 'reset';
 
 function LoginScreen() {
   const navigate = useNavigate();
-  const { configured, signIn, signUp, createOrganization, demoSignIn } = useAuth();
+  const { configured, signIn, signUp, sendPasswordReset, updatePassword, createOrganization, demoSignIn } = useAuth();
 
-  const [mode, setMode] = useState<Mode>('signin');
+  const isResetLink = new URLSearchParams(window.location.search).has('reset-password');
+  const [mode, setMode] = useState<Mode>(isResetLink ? 'reset' : 'signin');
   const [fullName, setFullName] = useState('');
   const [company, setCompany] = useState('');
   const [email, setEmail] = useState(configured ? '' : 'aarav.mehta@ontime.co');
   const [pw, setPw] = useState(configured ? '' : 'ontime');
+  const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [remember, setRemember] = useState(true);
-  const [errors, setErrors] = useState<{ email?: string | null; pw?: string | null; name?: string | null; company?: string | null }>({});
+  const [errors, setErrors] = useState<{ email?: string | null; pw?: string | null; confirm?: string | null; name?: string | null; company?: string | null }>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [formNotice, setFormNotice] = useState<string | null>(null);
   const [phase, setPhase] = useState<'idle' | 'submitting' | 'face'>('idle');
   const [shake, setShake] = useState(false);
 
@@ -88,21 +91,40 @@ function LoginScreen() {
   const submit = async () => {
     if (phase !== 'idle') return;
     setFormError(null);
+    setFormNotice(null);
     const e: typeof errors = {};
+    const trimmedEmail = email.trim();
+    const needsEmail = mode !== 'reset';
     if (mode === 'signup' && !fullName.trim()) e.name = 'Enter your name';
     if (mode === 'signup' && !company.trim()) e.company = 'Enter your company';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) e.email = 'Enter a valid work email';
-    if (pw.length < 6) e.pw = configured ? 'At least 6 characters' : 'Enter your password';
+    if (needsEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) e.email = 'Enter a valid work email';
+    if (mode !== 'forgot' && pw.length < 6) e.pw = configured ? 'At least 6 characters' : 'Enter your password';
+    if (mode === 'reset' && confirmPw !== pw) e.confirm = 'Passwords do not match';
     setErrors(e);
     if (Object.keys(e).length) { triggerShake(); return; }
 
     setPhase('submitting');
+    if (mode === 'forgot') {
+      const { error } = await sendPasswordReset(trimmedEmail);
+      setPhase('idle');
+      if (error) { setFormError(error); triggerShake(); return; }
+      setFormNotice('Password reset link sent. Check your email to continue.');
+      return;
+    }
+
+    if (mode === 'reset') {
+      const { error } = await updatePassword(pw);
+      if (error) { setFormError(error); setPhase('idle'); triggerShake(); return; }
+      navigate('/app');
+      return;
+    }
+
     if (mode === 'signin') {
-      const { error } = await signIn(email.trim(), pw);
+      const { error } = await signIn(trimmedEmail, pw);
       if (error) { setFormError(error); setPhase('idle'); triggerShake(); return; }
       navigate('/app');
     } else {
-      const { error } = await signUp(fullName.trim(), email.trim(), pw);
+      const { error } = await signUp(fullName.trim(), trimmedEmail, pw);
       if (error) { setFormError(error); setPhase('idle'); triggerShake(); return; }
       const org = await createOrganization(company.trim());
       if (org.error) {
@@ -122,6 +144,18 @@ function LoginScreen() {
   };
 
   const isSignup = mode === 'signup';
+  const isForgot = mode === 'forgot';
+  const isReset = mode === 'reset';
+  const title = isSignup ? 'Create your workspace' : isForgot ? 'Reset password' : isReset ? 'Create new password' : 'Welcome back';
+  const subtitle = isSignup
+    ? 'Set up your company and become the Owner.'
+    : isForgot
+      ? 'Enter your work email and we will send a secure reset link.'
+      : isReset
+        ? 'Choose a new password for your account.'
+        : 'Sign in to mark your attendance and manage leave.';
+  const primaryText = isForgot ? 'Send reset link' : isReset ? 'Update password' : isSignup ? 'Create workspace' : 'Sign in';
+  const busyText = isForgot ? 'Sending...' : isReset ? 'Updating...' : isSignup ? 'Creating...' : 'Signing in...';
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)', position: 'relative', overflow: 'hidden' }}>
@@ -142,8 +176,8 @@ function LoginScreen() {
               <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-3)', marginTop: 4, letterSpacing: '0.02em' }}>by CATaskKit</div>
             </div>
           </div>
-          <h1 style={{ margin: '34px 0 0', fontSize: 30, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.1 }}>{isSignup ? 'Create your workspace' : 'Welcome back'}</h1>
-          <p style={{ margin: '8px 0 0', fontSize: 15, color: 'var(--text-3)', fontWeight: 500, lineHeight: 1.45 }}>{isSignup ? 'Set up your company and become the Owner.' : 'Sign in to mark your attendance and manage leave.'}</p>
+          <h1 style={{ margin: '34px 0 0', fontSize: 30, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.1 }}>{title}</h1>
+          <p style={{ margin: '8px 0 0', fontSize: 15, color: 'var(--text-3)', fontWeight: 500, lineHeight: 1.45 }}>{subtitle}</p>
         </div>
 
         <div style={{ marginTop: 26, animation: shake ? 'loginShake .42s cubic-bezier(.36,.07,.19,.97)' : 'none' }}>
@@ -153,23 +187,34 @@ function LoginScreen() {
               <Field icon="building" label="Company" value={company} onChange={setCompany} placeholder="Acme Technologies" error={errors.company} onFocus={() => setErrors((s) => ({ ...s, company: null }))} />
             </>
           )}
-          <Field
-            icon="mail" type="email" label="Work email" autoComplete="username"
-            value={email} onChange={setEmail} placeholder="you@company.com"
-            error={errors.email} onFocus={() => setErrors((s) => ({ ...s, email: null }))}
-          />
-          <Field
-            icon="lock" type={showPw ? 'text' : 'password'} label="Password" autoComplete={isSignup ? 'new-password' : 'current-password'}
-            value={pw} onChange={setPw} placeholder={isSignup ? 'Create a password' : 'Enter your password'}
-            error={errors.pw} onFocus={() => setErrors((s) => ({ ...s, pw: null }))}
-            trailing={
-              <button onClick={() => setShowPw((s) => !s)} style={loginStyles.eyeBtn} aria-label="Toggle password">
-                <Icon name={showPw ? 'eyeOff' : 'eye'} size={19} color="var(--text-3)" strokeWidth={1.9} />
-              </button>
-            }
-          />
+          {!isReset && (
+            <Field
+              icon="mail" type="email" label={isForgot ? 'Account email' : 'Work email'} autoComplete="username"
+              value={email} onChange={setEmail} placeholder="you@company.com"
+              error={errors.email} onFocus={() => setErrors((s) => ({ ...s, email: null }))}
+            />
+          )}
+          {!isForgot && (
+            <Field
+              icon="lock" type={showPw ? 'text' : 'password'} label={isReset ? 'New password' : 'Password'} autoComplete={isSignup || isReset ? 'new-password' : 'current-password'}
+              value={pw} onChange={setPw} placeholder={isSignup || isReset ? 'Create a password' : 'Enter your password'}
+              error={errors.pw} onFocus={() => setErrors((s) => ({ ...s, pw: null }))}
+              trailing={
+                <button onClick={() => setShowPw((s) => !s)} style={loginStyles.eyeBtn} aria-label="Toggle password">
+                  <Icon name={showPw ? 'eyeOff' : 'eye'} size={19} color="var(--text-3)" strokeWidth={1.9} />
+                </button>
+              }
+            />
+          )}
+          {isReset && (
+            <Field
+              icon="lock" type="password" label="Confirm password" autoComplete="new-password"
+              value={confirmPw} onChange={setConfirmPw} placeholder="Repeat new password"
+              error={errors.confirm} onFocus={() => setErrors((s) => ({ ...s, confirm: null }))}
+            />
+          )}
 
-          {!isSignup && (
+          {mode === 'signin' && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '4px 2px 24px' }}>
               <button onClick={() => setRemember((r) => !r)} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                 <span style={{
@@ -182,7 +227,14 @@ function LoginScreen() {
                 </span>
                 <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-2)' }}>Remember me</span>
               </button>
-              <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 13.5, fontWeight: 700, color: 'var(--accent)' }}>Forgot password?</button>
+              <button onClick={() => { setMode('forgot'); setFormError(null); setFormNotice(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 13.5, fontWeight: 700, color: 'var(--accent)' }}>Forgot password?</button>
+            </div>
+          )}
+
+          {formNotice && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 14px', padding: '11px 13px', borderRadius: 'var(--r-card)', background: 'var(--success-soft)' }}>
+              <Icon name="checkCircle" size={16} color="var(--success)" strokeWidth={2} />
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--success)', lineHeight: 1.4 }}>{formNotice}</span>
             </div>
           )}
 
@@ -194,10 +246,10 @@ function LoginScreen() {
           )}
 
           <button onClick={submit} disabled={phase !== 'idle'} style={{ ...loginStyles.primaryBtn, opacity: phase === 'face' ? 0.55 : 1, cursor: phase === 'idle' ? 'pointer' : 'default', marginTop: isSignup ? 6 : 0 }}>
-            {phase === 'submitting' ? (<><span className="login-spinner" /> {isSignup ? 'Creating…' : 'Signing in…'}</>) : (<>{isSignup ? 'Create workspace' : 'Sign in'} <Icon name="arrowRight" size={20} color="#fff" strokeWidth={2.4} /></>)}
+            {phase === 'submitting' ? (<><span className="login-spinner" /> {busyText}</>) : (<>{primaryText} <Icon name="arrowRight" size={20} color="#fff" strokeWidth={2.4} /></>)}
           </button>
 
-          {!configured && (
+          {!configured && !isForgot && !isReset && (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '22px 0' }}>
                 <div style={{ flex: 1, height: 1, background: 'var(--hair)' }} />
@@ -218,9 +270,11 @@ function LoginScreen() {
         <div style={{ paddingBottom: 'calc(20px + var(--safe))' }}>
           <div style={{ textAlign: 'center', fontSize: 13.5, color: 'var(--text-3)', fontWeight: 500 }}>
             {isSignup ? (
-              <>Already have a workspace? <button onClick={() => { setMode('signin'); setFormError(null); }} style={linkBtn}>Sign in</button></>
+              <>Already have a workspace? <button onClick={() => { setMode('signin'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Sign in</button></>
+            ) : isForgot || isReset ? (
+              <>Remembered it? <button onClick={() => { setMode('signin'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Sign in</button></>
             ) : (
-              <>New here? <button onClick={() => { setMode('signup'); setFormError(null); }} style={linkBtn}>Create a workspace</button></>
+              <>New here? <button onClick={() => { setMode('signup'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Create a workspace</button></>
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 16, color: 'var(--text-3)' }}>
@@ -256,9 +310,10 @@ export default function Login() {
   const navigate = useNavigate();
   const { authed } = useAuth();
   const vars = themeVars(DEFAULT_TWEAKS);
+  const isResetLink = new URLSearchParams(window.location.search).has('reset-password');
 
   // Already signed in → go straight to the app.
-  useEffect(() => { if (authed) navigate('/app', { replace: true }); }, [authed, navigate]);
+  useEffect(() => { if (authed && !isResetLink) navigate('/app', { replace: true }); }, [authed, isResetLink, navigate]);
 
   return (
     <PhoneFrame dark={DEFAULT_TWEAKS.dark}>

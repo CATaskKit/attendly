@@ -112,10 +112,10 @@ export function Pill({ children, tone = 'neutral', style }: { children: ReactNod
 
 export function StatusBadge({ status }: { status: string }) {
   const map: Record<string, Tone> = {
-    Pending: 'warning', Approved: 'success', Rejected: 'danger', Cancelled: 'neutral',
+    Pending: 'warning', Forwarded: 'accent', Approved: 'success', Rejected: 'danger', Cancelled: 'neutral',
     Present: 'success', Absent: 'danger', Late: 'warning', Leave: 'accent', WFH: 'accent', Holiday: 'neutral',
   };
-  const dot = ['Pending', 'Approved', 'Rejected', 'Cancelled'].includes(status);
+  const dot = ['Pending', 'Forwarded', 'Approved', 'Rejected', 'Cancelled'].includes(status);
   return <Pill tone={map[status] || 'neutral'}>{dot && <span style={{ fontSize: 8 }}>●</span>}{status}</Pill>;
 }
 

@@ -6,6 +6,8 @@ dist-ssr
 .vite
 .DS_Store
 npm-debug.log*
+vite-*.log
+.npm-cache/
 
 # Capacitor / Android build artifacts (the android/ project itself is kept)
 android/.gradle

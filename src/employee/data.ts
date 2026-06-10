@@ -1,4 +1,6 @@
 // Demo data + shared context types for the employee app.
+import type { AttendanceRow, Employee, Holiday, LeaveBalance } from '../lib/api';
+import type { AttendanceAudit } from '../lib/attendanceAudit';
 
 export type LeaveRequest = {
   type: string;
@@ -21,7 +23,7 @@ export type TeamRequest = {
   days: number;
   applied: string;
   reason: string;
-  status: 'Pending' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'Forwarded' | 'Approved' | 'Rejected';
   active?: boolean;
   resolvedAt?: string;
 };
@@ -51,13 +53,24 @@ export type Ctx = {
   elapsed: number;
   now: Date;
   leaveRequests: LeaveRequest[];
+  live: boolean;
+  employee: Employee | null;
+  employeeName: string;
+  attendanceRows: AttendanceRow[];
+  leaveBalances: LeaveBalance[];
+  holidays: Holiday[];
+  weeklyHours: number[];
+  attendanceAudit: AttendanceAudit;
+  refreshAttendanceAudit: () => Promise<AttendanceAudit>;
+  timeSynced: boolean;
+  timeSource: string | null;
   fmtClock: (d: Date | null) => string;
   fmtDur: (secs: number) => string;
   openOverlay: (o: string) => void;
   closeOverlay: () => void;
-  doCheckIn: () => void;
+  doCheckIn: (audit?: AttendanceAudit) => void;
   doCheckOut: () => void;
-  submitLeave: (l: Omit<LeaveRequest, 'status' | 'mgr'>) => void;
+  submitLeave: (l: Omit<LeaveRequest, 'status' | 'mgr'> & { fromDate?: string; toDate?: string; reason?: string; attachment?: string | null }) => void;
   teamRequests: TeamRequest[];
   approveTeam: (id: string) => void;
   rejectTeam: (id: string) => void;

@@ -54,6 +54,12 @@ create table if not exists profiles (
   email       text,
   role        user_role not null default 'employee',
   employee_id uuid,                       -- optional link to employees row
+  phone       text,
+  personal_email text,
+  date_of_birth date,
+  address     text,
+  emergency_contact_name text,
+  emergency_contact_phone text,
   created_at  timestamptz not null default now()
 );
 create index if not exists profiles_org_idx on profiles (org_id);

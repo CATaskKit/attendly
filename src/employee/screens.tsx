@@ -1,6 +1,8 @@
-import { type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, Avatar, Card, Pill, StatusBadge } from './ui';
 import type { Ctx } from './data';
+import { useAuth } from '../lib/auth';
+import { getMyEmployee, type Employee } from '../lib/api';
 
 // ── Schematic map placeholder (no real tiles) ────────────────────────
 export function MapView({ height = 190, label = 'HQ — Brigade Tech Park, Bengaluru' }: { height?: number; label?: string }) {
@@ -107,27 +109,38 @@ const heroBtn: CSSProperties = {
 
 // ─────────────────────── HOME / TODAY ────────────────────────────────
 export function HomeScreen({ ctx }: { ctx: Ctx }) {
-  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now } = ctx;
+  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employeeName, attendanceRows, leaveBalances, holidays, weeklyHours, live } = ctx;
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  const trend = [7.8, 8.2, 6.5, 8.6, 8.1, 4.0, 0];
+  const trend = live && weeklyHours.some((h) => h > 0) ? weeklyHours : [7.8, 8.2, 6.5, 8.6, 8.1, 4.0, 0];
   const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-  const maxH = 9;
+  const maxH = Math.max(9, ...trend);
+  const monthKey = now.toISOString().slice(0, 7);
+  const monthRows = attendanceRows.filter((r) => r.day.startsWith(monthKey));
+  const presentDays = live ? monthRows.filter((r) => ['Present', 'Late', 'WFH'].includes(r.status)).length : 18;
+  const trackedDays = live ? Math.max(presentDays, monthRows.length) : 22;
+  const leaveTotal = live ? leaveBalances.reduce((sum, b) => sum + b.available, 0) : 12;
+  const leaveTotalText = Number.isInteger(leaveTotal) ? String(leaveTotal) : leaveTotal.toFixed(1);
+  const avg = trend.length ? trend.reduce((sum, h) => sum + h, 0) / trend.length : 0;
+  const todayIso = now.toISOString().slice(0, 10);
+  const upcoming = holidays.filter((h) => h.date >= todayIso).sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+  const upcomingDate = upcoming ? new Date(`${upcoming.date}T00:00:00`) : null;
+  const daysAway = upcomingDate ? Math.max(0, Math.ceil((upcomingDate.getTime() - new Date(`${todayIso}T00:00:00`).getTime()) / 86400000)) : 0;
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 2px 18px' }}>
         <div>
           <div style={{ fontSize: 13, color: 'var(--text-3)', fontWeight: 600 }}>{greeting},</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>Aarav Mehta</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>{employeeName}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ position: 'relative', width: 42, height: 42, borderRadius: '50%', background: 'var(--card)', border: 'var(--card-border)', boxShadow: 'var(--card-shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="bell" size={20} color="var(--text-2)" />
             <span style={{ position: 'absolute', top: 9, right: 11, width: 7, height: 7, borderRadius: '50%', background: 'var(--danger)', border: '1.5px solid var(--card)' }} />
           </div>
-          <Avatar name="Aarav Mehta" size={42} accent="var(--accent)" />
+          <Avatar name={employeeName} size={42} accent="var(--accent)" />
         </div>
       </div>
 
@@ -181,14 +194,14 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <Icon name="checkCircle" size={18} color="var(--success)" /><span style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Present</span>
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>18<span style={{ fontSize: 15, color: 'var(--text-3)', fontWeight: 600 }}> / 22</span></div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>{presentDays}<span style={{ fontSize: 15, color: 'var(--text-3)', fontWeight: 600 }}> / {trackedDays || 0}</span></div>
           <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>days this month</div>
         </Card>
         <Card pad={15}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <Icon name="leave" size={18} color="var(--accent)" /><span style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Leave balance</span>
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>12<span style={{ fontSize: 15, color: 'var(--text-3)', fontWeight: 600 }}> days</span></div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>{leaveTotalText}<span style={{ fontSize: 15, color: 'var(--text-3)', fontWeight: 600 }}> days</span></div>
           <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>across all types</div>
         </Card>
       </div>
@@ -212,58 +225,84 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
           <div style={{ display: 'flex', gap: 16, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hair)' }}>
             <Legend color="var(--accent)" label="Full day" />
             <Legend color="var(--warning)" label="Half day" />
-            <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Avg <b style={{ color: 'var(--text-1)' }}>7.8h</b></span>
+            <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Avg <b style={{ color: 'var(--text-1)' }}>{avg.toFixed(1)}h</b></span>
           </div>
         </Card>
       </div>
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle>Upcoming</SectionTitle>
-        <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
-          <div style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--accent)' }}>AUG</span>
-            <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent)', lineHeight: 1 }}>15</span>
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>Independence Day</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>National holiday · Saturday</div>
-          </div>
-          <Pill tone="neutral">In 9 days</Pill>
-        </Card>
+        {upcoming && upcomingDate ? (
+          <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+            <div style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--accent)' }}>{upcomingDate.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent)', lineHeight: 1 }}>{upcomingDate.getDate()}</span>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>{upcoming.name}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{upcoming.type} holiday - {upcomingDate.toLocaleDateString('en-US', { weekday: 'long' })}</div>
+            </div>
+            <Pill tone="neutral">{daysAway === 0 ? 'Today' : `In ${daysAway}d`}</Pill>
+          </Card>
+        ) : (
+          <Card pad={14} style={{ color: 'var(--text-3)', fontSize: 13.5 }}>No upcoming holidays yet.</Card>
+        )}
       </div>
     </div>
   );
 }
 
 // ─────────────────────── ATTENDANCE TAB ──────────────────────────────
-export function AttendanceScreen() {
-  const log = [
+export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
+  const fmtTime = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false }) : '-';
+  const fmtHours = (seconds: number | null) => {
+    if (!seconds) return '-';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return `${h}:${String(m).padStart(2, '0')}`;
+  };
+  const demoLog = [
     { d: 'Wed', date: 'Jun 5', in: '9:18', out: '6:42', h: '9:24', status: 'Present' },
     { d: 'Tue', date: 'Jun 4', in: '9:31', out: '6:35', h: '9:04', status: 'Late' },
     { d: 'Mon', date: 'Jun 3', in: '9:12', out: '1:30', h: '4:18', status: 'WFH' },
-    { d: 'Sun', date: 'Jun 2', in: '—', out: '—', h: '—', status: 'Holiday' },
-    { d: 'Sat', date: 'Jun 1', in: '—', out: '—', h: '—', status: 'Leave' },
+    { d: 'Sun', date: 'Jun 2', in: '-', out: '-', h: '-', status: 'Holiday' },
+    { d: 'Sat', date: 'Jun 1', in: '-', out: '-', h: '-', status: 'Leave' },
     { d: 'Fri', date: 'May 31', in: '9:05', out: '6:20', h: '9:15', status: 'Present' },
   ];
+  const liveLog = ctx.attendanceRows.map((r) => {
+    const d = new Date(`${r.day}T00:00:00`);
+    return {
+      d: d.toLocaleDateString('en-US', { weekday: 'short' }),
+      date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      in: fmtTime(r.check_in_at),
+      out: fmtTime(r.check_out_at),
+      h: fmtHours(r.work_seconds),
+      status: r.status,
+    };
+  });
+  const log = ctx.live ? liveLog : demoLog;
+  const count = (status: string) => log.filter((r) => r.status === status).length;
+  const presentLike = log.filter((r) => ['Present', 'Late', 'WFH'].includes(r.status)).length;
+  const rate = log.length ? Math.round((presentLike / log.length) * 100) : 0;
   const summary = [
-    { label: 'Present', value: 18, tone: 'success' },
-    { label: 'Leave', value: 2, tone: 'accent' },
-    { label: 'Absent', value: 0, tone: 'danger' },
-    { label: 'Late', value: 3, tone: 'warning' },
+    { label: 'Present', value: count('Present'), tone: 'success' },
+    { label: 'Leave', value: count('Leave'), tone: 'accent' },
+    { label: 'Absent', value: count('Absent'), tone: 'danger' },
+    { label: 'Late', value: count('Late'), tone: 'warning' },
   ];
   return (
     <div>
-      <ScreenHeader title="Attendance" subtitle="June 2026" />
+      <ScreenHeader title="Attendance" subtitle={ctx.now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} />
       <Card pad={16}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <div>
             <div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Attendance rate</div>
-            <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>94%</div>
+            <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{rate}%</div>
           </div>
           <div style={{ position: 'relative', width: 62, height: 62 }}>
             <svg width="62" height="62" style={{ transform: 'rotate(-90deg)' }}>
               <circle cx="31" cy="31" r="26" fill="none" stroke="var(--muted-soft)" strokeWidth="8" />
-              <circle cx="31" cy="31" r="26" fill="none" stroke="var(--accent)" strokeWidth="8" strokeLinecap="round" strokeDasharray={`${0.94 * 163} 163`} />
+              <circle cx="31" cy="31" r="26" fill="none" stroke="var(--accent)" strokeWidth="8" strokeLinecap="round" strokeDasharray={`${(rate / 100) * 163} 163`} />
             </svg>
           </div>
         </div>
@@ -280,15 +319,16 @@ export function AttendanceScreen() {
       <div style={{ marginTop: 22 }}>
         <SectionTitle action="Export">Daily log</SectionTitle>
         <Card pad={0} style={{ overflow: 'hidden' }}>
+          {log.length === 0 && <div style={{ padding: 18, color: 'var(--text-3)', fontSize: 13.5 }}>No attendance records yet.</div>}
           {log.map((e, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 15px', borderBottom: i < log.length - 1 ? '1px solid var(--hair)' : 'none' }}>
+            <div key={`${e.date}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 15px', borderBottom: i < log.length - 1 ? '1px solid var(--hair)' : 'none' }}>
               <div style={{ width: 40, textAlign: 'center', flexShrink: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>{e.d}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{e.date.split(' ')[1]}</div>
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-1)', fontVariantNumeric: 'tabular-nums' }}>{e.in === '—' ? '—' : `${e.in} – ${e.out}`}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{e.h === '—' ? 'No hours' : `${e.h} hrs`}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-1)', fontVariantNumeric: 'tabular-nums' }}>{e.in === '-' ? '-' : `${e.in} - ${e.out}`}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{e.h === '-' ? 'No hours' : `${e.h} hrs`}</div>
               </div>
               <StatusBadge status={e.status} />
             </div>
@@ -300,8 +340,8 @@ export function AttendanceScreen() {
   );
 }
 
-// ─────────────────────── PROFILE TAB ─────────────────────────────────
-export function ProfileScreen({ ctx }: { ctx: Ctx }) {
+// PROFILE TAB ─────────────────────────────────
+function LegacyProfileScreen({ ctx }: { ctx: Ctx }) {
   const rows = [
     { icon: 'user', label: 'Employee code', value: 'ATL-2041' },
     { icon: 'briefcase', label: 'Designation', value: 'Sr. Product Designer' },
@@ -356,6 +396,242 @@ export function ProfileScreen({ ctx }: { ctx: Ctx }) {
       </button>
 
       <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--text-3)', fontWeight: 600, marginTop: 14 }}>On Time · v2.4.1</div>
+      <div style={{ height: 20 }} />
+    </div>
+  );
+}
+
+// ─────────────────────── PROFILE DATA HELPERS ────────────────────────
+type PersonalInfoForm = {
+  full_name: string;
+  phone: string;
+  personal_email: string;
+  date_of_birth: string;
+  address: string;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+};
+
+const emptyInfo: PersonalInfoForm = {
+  full_name: '',
+  phone: '',
+  personal_email: '',
+  date_of_birth: '',
+  address: '',
+  emergency_contact_name: '',
+  emergency_contact_phone: '',
+};
+
+const demoEmployee: Employee = {
+  id: 'demo',
+  code: 'ATL-2041',
+  name: 'Aarav Mehta',
+  dept: 'Design',
+  designation: 'Sr. Product Designer',
+  manager: 'Priya Nair',
+  type: 'Full-time',
+  status: 'Active',
+  email: 'aarav.mehta@ontime.co',
+  phone: '+91 98860 41122',
+  joined: '2022-03-14',
+};
+
+function formatProfileDate(value?: string | null) {
+  if (!value) return 'Not added';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function ProfileRow({ icon, label, value, last = false }: { icon: string; label: string; value?: string | null; last?: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '14px 16px', borderBottom: last ? 'none' : '1px solid var(--hair)' }}>
+      <Icon name={icon} size={19} color="var(--text-3)" />
+      <span style={{ flex: 1, fontSize: 13.5, color: 'var(--text-3)', fontWeight: 600 }}>{label}</span>
+      <span style={{ maxWidth: '52%', textAlign: 'right', fontSize: 14, fontWeight: 700, color: value ? 'var(--text-1)' : 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value || 'Not added'}</span>
+    </div>
+  );
+}
+
+function InfoInput({
+  label, value, onChange, type = 'text', placeholder,
+}: {
+  label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string;
+}) {
+  return (
+    <label style={{ display: 'block', marginBottom: 12 }}>
+      <span style={{ display: 'block', marginBottom: 7, fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>{label}</span>
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: '100%', height: 44, boxSizing: 'border-box', borderRadius: 12,
+          border: '1.5px solid var(--hair)', background: 'var(--bg)', color: 'var(--text-1)',
+          padding: '0 12px', outline: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600,
+        }}
+      />
+    </label>
+  );
+}
+
+export function ProfileScreen({ ctx }: { ctx: Ctx }) {
+  const { configured, profile, updateProfile } = useAuth();
+  const [employee, setEmployee] = useState<Employee | null>(configured ? null : demoEmployee);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<PersonalInfoForm>(emptyInfo);
+
+  useEffect(() => {
+    if (!profile) return;
+    setForm({
+      full_name: profile.full_name || '',
+      phone: profile.phone || '',
+      personal_email: profile.personal_email || '',
+      date_of_birth: profile.date_of_birth || '',
+      address: profile.address || '',
+      emergency_contact_name: profile.emergency_contact_name || '',
+      emergency_contact_phone: profile.emergency_contact_phone || '',
+    });
+  }, [profile]);
+
+  useEffect(() => {
+    let active = true;
+    if (!configured || !profile) {
+      setEmployee(demoEmployee);
+      return;
+    }
+    getMyEmployee(profile)
+      .then((row) => { if (active) setEmployee(row); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : 'Could not load employee details.'); });
+    return () => { active = false; };
+  }, [configured, profile]);
+
+  const setInfo = (key: keyof PersonalInfoForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const name = form.full_name || employee?.name || profile?.full_name || 'You';
+  const email = profile?.email || employee?.email || 'Not added';
+  const status = employee?.status || 'Active';
+  const workRows = [
+    { icon: 'user', label: 'Employee code', value: employee?.code },
+    { icon: 'briefcase', label: 'Designation', value: employee?.designation },
+    { icon: 'flag', label: 'Department', value: employee?.dept },
+    { icon: 'user', label: 'Reporting to', value: employee?.manager },
+    { icon: 'calendar', label: 'Joined', value: formatProfileDate(employee?.joined) },
+  ];
+  const personalRows = [
+    { icon: 'device', label: 'Mobile', value: form.phone || employee?.phone },
+    { icon: 'mail', label: 'Personal email', value: form.personal_email },
+    { icon: 'calendar', label: 'Date of birth', value: formatProfileDate(form.date_of_birth) },
+    { icon: 'house', label: 'Address', value: form.address },
+    { icon: 'user', label: 'Emergency contact', value: form.emergency_contact_name },
+    { icon: 'device', label: 'Emergency phone', value: form.emergency_contact_phone },
+  ];
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    const { error: saveError } = await updateProfile({
+      full_name: form.full_name.trim() || null,
+      phone: form.phone.trim() || null,
+      personal_email: form.personal_email.trim() || null,
+      date_of_birth: form.date_of_birth || null,
+      address: form.address.trim() || null,
+      emergency_contact_name: form.emergency_contact_name.trim() || null,
+      emergency_contact_phone: form.emergency_contact_phone.trim() || null,
+    });
+    setSaving(false);
+    if (saveError) { setError(saveError); return; }
+    setEditing(false);
+    setNotice('Personal information saved.');
+    setTimeout(() => setNotice(null), 2600);
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 0 22px' }}>
+        <Avatar name={name} size={84} accent="var(--accent)" />
+        <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1)', marginTop: 12, letterSpacing: '-0.02em', textAlign: 'center' }}>{name}</div>
+        <div style={{ fontSize: 13.5, color: 'var(--text-3)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{email}</div>
+        <div style={{ marginTop: 10 }}><Pill tone={status === 'Active' ? 'success' : 'neutral'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: status === 'Active' ? 'var(--success)' : 'var(--text-3)' }} />{status}</Pill></div>
+      </div>
+
+      {notice && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '11px 13px', borderRadius: 'var(--r-card)', background: 'var(--success-soft)' }}>
+          <Icon name="checkCircle" size={16} color="var(--success)" strokeWidth={2} />
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--success)' }}>{notice}</span>
+        </div>
+      )}
+      {error && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '11px 13px', borderRadius: 'var(--r-card)', background: 'var(--danger-soft)' }}>
+          <Icon name="shield" size={16} color="var(--danger)" strokeWidth={2} />
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--danger)', lineHeight: 1.4 }}>{error}</span>
+        </div>
+      )}
+
+      <SectionTitle>Work information</SectionTitle>
+      <Card pad={0} style={{ overflow: 'hidden' }}>
+        {workRows.map((r, i) => <ProfileRow key={r.label} {...r} last={i === workRows.length - 1} />)}
+      </Card>
+
+      <SectionTitle action={editing ? 'Cancel' : 'Edit'} onAction={() => { setEditing((open) => !open); setError(null); setNotice(null); }}>Personal information</SectionTitle>
+      {editing ? (
+        <Card pad={16}>
+          <InfoInput label="Full name" value={form.full_name} onChange={(v) => setInfo('full_name', v)} placeholder="Your full name" />
+          <InfoInput label="Mobile" value={form.phone} onChange={(v) => setInfo('phone', v)} placeholder="+91 90000 00000" />
+          <InfoInput label="Personal email" type="email" value={form.personal_email} onChange={(v) => setInfo('personal_email', v)} placeholder="name@example.com" />
+          <InfoInput label="Date of birth" type="date" value={form.date_of_birth} onChange={(v) => setInfo('date_of_birth', v)} />
+          <InfoInput label="Address" value={form.address} onChange={(v) => setInfo('address', v)} placeholder="Home address" />
+          <InfoInput label="Emergency contact name" value={form.emergency_contact_name} onChange={(v) => setInfo('emergency_contact_name', v)} placeholder="Contact name" />
+          <InfoInput label="Emergency contact phone" value={form.emergency_contact_phone} onChange={(v) => setInfo('emergency_contact_phone', v)} placeholder="+91 90000 00000" />
+          <button onClick={save} disabled={saving} style={{
+            width: '100%', height: 48, borderRadius: 'var(--r-btn)', border: 'none', cursor: saving ? 'default' : 'pointer',
+            background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 15, fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: saving ? 0.7 : 1,
+          }}>
+            <Icon name="check" size={18} color="#fff" strokeWidth={2.4} />
+            {saving ? 'Saving...' : 'Save personal information'}
+          </button>
+        </Card>
+      ) : (
+        <Card pad={0} style={{ overflow: 'hidden' }}>
+          {personalRows.map((r, i) => <ProfileRow key={r.label} {...r} last={i === personalRows.length - 1} />)}
+        </Card>
+      )}
+
+      <Card pad={0} style={{ overflow: 'hidden', marginTop: 14 }}>
+        {['Salary slips', 'Notification settings', 'Help & support'].map((l, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '15px 16px', borderBottom: i < 2 ? '1px solid var(--hair)' : 'none', cursor: 'pointer' }}>
+            <span style={{ flex: 1, fontSize: 14.5, fontWeight: 600, color: 'var(--text-1)' }}>{l}</span>
+            <Icon name="chevronRight" size={18} color="var(--text-3)" />
+          </div>
+        ))}
+      </Card>
+
+      {(ctx.role === 'owner' || ctx.role === 'hr' || ctx.role === 'manager') && ctx.goAdmin && (
+        <Card pad={0} style={{ overflow: 'hidden', marginTop: 14 }}>
+          <div onClick={ctx.goAdmin} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '15px 16px', cursor: 'pointer' }}>
+            <Icon name="briefcase" size={19} color="var(--accent)" />
+            <span style={{ flex: 1, fontSize: 14.5, fontWeight: 700, color: 'var(--accent)' }}>Admin console</span>
+            <Icon name="chevronRight" size={18} color="var(--text-3)" />
+          </div>
+        </Card>
+      )}
+
+      <button onClick={() => ctx.openOverlay('logout')} style={{
+        width: '100%', marginTop: 14, height: 52, borderRadius: 'var(--r-card)',
+        border: 'var(--card-border)', background: 'var(--card)', boxShadow: 'var(--card-shadow)',
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+        color: 'var(--danger)', fontWeight: 700, fontSize: 14.5, fontFamily: 'inherit',
+      }}>
+        <Icon name="logout" size={18} color="var(--danger)" strokeWidth={2.1} />
+        Log out
+      </button>
+
+      <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--text-3)', fontWeight: 600, marginTop: 14 }}>On Time - v2.4.1</div>
       <div style={{ height: 20 }} />
     </div>
   );
