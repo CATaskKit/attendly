@@ -3,9 +3,10 @@ import { Icon, Avatar, Card, Pill, StatusBadge } from './ui';
 import type { Ctx } from './data';
 import { useAuth } from '../lib/auth';
 import { getMyEmployee, type Employee } from '../lib/api';
+import { APP_NAME, APP_VERSION } from '../lib/brand';
 
 // ── Schematic map placeholder (no real tiles) ────────────────────────
-export function MapView({ height = 190, label = 'HQ — Brigade Tech Park, Bengaluru' }: { height?: number; label?: string }) {
+export function MapView({ height = 190, label = 'Current device location' }: { height?: number; label?: string }) {
   return (
     <div style={{
       position: 'relative', height, borderRadius: 'var(--r-card)', overflow: 'hidden',
@@ -52,7 +53,7 @@ export function VRow({ icon, label, value, ok = true, mono }: { icon: string; la
   );
 }
 
-export function SelfieTile({ captured, onToggle }: { captured: boolean; onToggle: () => void }) {
+export function SelfieTile({ captured, onToggle, name = 'You' }: { captured: boolean; onToggle: () => void; name?: string }) {
   return (
     <div onClick={onToggle} style={{
       position: 'relative', height: 96, width: 96, flexShrink: 0, borderRadius: 'var(--r-card)',
@@ -63,7 +64,7 @@ export function SelfieTile({ captured, onToggle }: { captured: boolean; onToggle
     }}>
       {captured ? (
         <>
-          <Avatar name="Aarav Mehta" size={44} accent="var(--accent)" />
+          <Avatar name={name} size={44} accent="var(--accent)" />
           <div style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="check" size={13} color="#fff" strokeWidth={3} />
           </div>
@@ -109,9 +110,13 @@ const heroBtn: CSSProperties = {
 
 // ─────────────────────── HOME / TODAY ────────────────────────────────
 export function HomeScreen({ ctx }: { ctx: Ctx }) {
-  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employeeName, attendanceRows, leaveBalances, holidays, weeklyHours, live } = ctx;
+  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employee, employeeName, attendanceRows, leaveBalances, holidays, weeklyHours, live } = ctx;
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
+  const fmtShort = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
+  const overtimeSecs = Math.max(0, elapsed - 8 * 3600);
+  const roleLine = [employee?.designation, employee?.dept].filter(Boolean).join(' · ') || 'Mark your attendance';
+  const checkInLoc = attendanceRows[0]?.location || null;
 
   const trend = live && weeklyHours.some((h) => h > 0) ? weeklyHours : [7.8, 8.2, 6.5, 8.6, 8.1, 4.0, 0];
   const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -160,7 +165,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
         {status === 'out' && (
           <div style={{ position: 'relative' }}>
             <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{fmtClock(now)}</div>
-            <div style={{ fontSize: 13.5, opacity: 0.85, marginTop: 6, marginBottom: 18 }}>Shift 9:30 AM – 6:30 PM · HQ Bengaluru</div>
+            <div style={{ fontSize: 13.5, opacity: 0.85, marginTop: 6, marginBottom: 18 }}>{roleLine}</div>
             <button onClick={() => openOverlay('checkin')} style={heroBtn}>
               <Icon name="mapPin" size={19} color="var(--accent)" strokeWidth={2.2} /> Check In
             </button>
@@ -170,7 +175,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
           <div style={{ position: 'relative' }}>
             <div style={{ fontSize: 12.5, opacity: 0.85, marginBottom: 2 }}>Working time</div>
             <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{fmtDur(elapsed)}</div>
-            <div style={{ fontSize: 13.5, opacity: 0.85, marginTop: 6, marginBottom: 18 }}>Checked in at {fmtClock(checkInTime)} · HQ Bengaluru</div>
+            <div style={{ fontSize: 13.5, opacity: 0.85, marginTop: 6, marginBottom: 18 }}>Checked in at {fmtClock(checkInTime)}{checkInLoc ? ` · ${checkInLoc}` : ''}</div>
             <button onClick={() => openOverlay('checkout')} style={heroBtn}>
               <Icon name="clock" size={19} color="var(--accent)" strokeWidth={2.2} /> Check Out
             </button>
@@ -183,7 +188,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
             <div style={{ display: 'flex', gap: 22, marginTop: 16 }}>
               <div><div style={{ fontSize: 11.5, opacity: 0.8 }}>Check in</div><div style={{ fontSize: 16, fontWeight: 700 }}>{fmtClock(checkInTime)}</div></div>
               <div><div style={{ fontSize: 11.5, opacity: 0.8 }}>Check out</div><div style={{ fontSize: 16, fontWeight: 700 }}>{fmtClock(checkOutTime)}</div></div>
-              <div><div style={{ fontSize: 11.5, opacity: 0.8 }}>Overtime</div><div style={{ fontSize: 16, fontWeight: 700 }}>+0:32</div></div>
+              <div><div style={{ fontSize: 11.5, opacity: 0.8 }}>Overtime</div><div style={{ fontSize: 16, fontWeight: 700 }}>+{fmtShort(overtimeSecs)}</div></div>
             </div>
           </div>
         )}
@@ -335,67 +340,6 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
           ))}
         </Card>
       </div>
-      <div style={{ height: 20 }} />
-    </div>
-  );
-}
-
-// PROFILE TAB ─────────────────────────────────
-function LegacyProfileScreen({ ctx }: { ctx: Ctx }) {
-  const rows = [
-    { icon: 'user', label: 'Employee code', value: 'ATL-2041' },
-    { icon: 'briefcase', label: 'Designation', value: 'Sr. Product Designer' },
-    { icon: 'flag', label: 'Department', value: 'Design' },
-    { icon: 'user', label: 'Reporting to', value: 'Priya Nair' },
-    { icon: 'calendar', label: 'Joined', value: '14 Mar 2022' },
-  ];
-  return (
-    <div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 0 22px' }}>
-        <Avatar name="Aarav Mehta" size={84} accent="var(--accent)" />
-        <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1)', marginTop: 12, letterSpacing: '-0.02em' }}>Aarav Mehta</div>
-        <div style={{ fontSize: 13.5, color: 'var(--text-3)' }}>aarav.mehta@ontime.co</div>
-        <div style={{ marginTop: 10 }}><Pill tone="success"><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />Active</Pill></div>
-      </div>
-      <Card pad={0} style={{ overflow: 'hidden' }}>
-        {rows.map((r, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '14px 16px', borderBottom: i < rows.length - 1 ? '1px solid var(--hair)' : 'none' }}>
-            <Icon name={r.icon} size={19} color="var(--text-3)" />
-            <span style={{ flex: 1, fontSize: 13.5, color: 'var(--text-3)', fontWeight: 600 }}>{r.label}</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{r.value}</span>
-          </div>
-        ))}
-      </Card>
-      <Card pad={0} style={{ overflow: 'hidden', marginTop: 14 }}>
-        {['Salary slips', 'Notification settings', 'Help & support'].map((l, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '15px 16px', borderBottom: i < 2 ? '1px solid var(--hair)' : 'none', cursor: 'pointer' }}>
-            <span style={{ flex: 1, fontSize: 14.5, fontWeight: 600, color: 'var(--text-1)' }}>{l}</span>
-            <Icon name="chevronRight" size={18} color="var(--text-3)" />
-          </div>
-        ))}
-      </Card>
-
-      {(ctx.role === 'owner' || ctx.role === 'hr' || ctx.role === 'manager') && ctx.goAdmin && (
-        <Card pad={0} style={{ overflow: 'hidden', marginTop: 14 }}>
-          <div onClick={ctx.goAdmin} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '15px 16px', cursor: 'pointer' }}>
-            <Icon name="briefcase" size={19} color="var(--accent)" />
-            <span style={{ flex: 1, fontSize: 14.5, fontWeight: 700, color: 'var(--accent)' }}>Admin console</span>
-            <Icon name="chevronRight" size={18} color="var(--text-3)" />
-          </div>
-        </Card>
-      )}
-
-      <button onClick={() => ctx.openOverlay('logout')} style={{
-        width: '100%', marginTop: 14, height: 52, borderRadius: 'var(--r-card)',
-        border: 'var(--card-border)', background: 'var(--card)', boxShadow: 'var(--card-shadow)',
-        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
-        color: 'var(--danger)', fontWeight: 700, fontSize: 14.5, fontFamily: 'inherit',
-      }}>
-        <Icon name="logout" size={18} color="var(--danger)" strokeWidth={2.1} />
-        Log out
-      </button>
-
-      <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--text-3)', fontWeight: 600, marginTop: 14 }}>On Time · v2.4.1</div>
       <div style={{ height: 20 }} />
     </div>
   );
@@ -631,7 +575,7 @@ export function ProfileScreen({ ctx }: { ctx: Ctx }) {
         Log out
       </button>
 
-      <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--text-3)', fontWeight: 600, marginTop: 14 }}>On Time - v2.4.1</div>
+      <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--text-3)', fontWeight: 600, marginTop: 14 }}>{APP_NAME} · v{APP_VERSION}</div>
       <div style={{ height: 20 }} />
     </div>
   );

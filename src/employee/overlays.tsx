@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { Icon, Card, Pill, SlideToConfirm } from './ui';
 import { MapView, VRow, SelfieTile } from './screens';
 import type { Ctx } from './data';
+import { APP_NAME } from '../lib/brand';
 
 const fieldLabel: CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 9, letterSpacing: '0.01em' };
 const primaryBtn: CSSProperties = { width: '100%', height: 54, borderRadius: 'var(--r-btn)', border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 16, boxShadow: '0 6px 18px var(--accent-glow)' };
@@ -47,12 +48,11 @@ export function CheckInScreen({ ctx }: { ctx: Ctx }) {
   const locationText = audit.location || (loadingAudit ? 'Detecting location...' : 'Location not allowed');
   const ipText = audit.ip || (loadingAudit ? 'Detecting IP...' : 'Unavailable');
   const locationOk = !!audit.location;
-  const clockText = timeSynced ? 'Online synced' : 'Using device time';
 
   return (
     <Overlay title="Check In" onClose={closeOverlay} footer={<SlideToConfirm label="Slide to check in" onConfirm={confirm} />}>
-      <MapView label={audit.location || 'Current device location'} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, background: locationOk ? 'var(--success-soft)' : 'var(--warning-soft)', borderRadius: 'var(--r-card)', padding: '13px 15px' }}>
+      <MapView height={148} label={audit.location || 'Current device location'} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, background: locationOk ? 'var(--success-soft)' : 'var(--warning-soft)', borderRadius: 'var(--r-card)', padding: '11px 14px' }}>
         <Icon name="shield" size={22} color={locationOk ? 'var(--success)' : 'var(--warning)'} strokeWidth={2} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700, color: locationOk ? 'var(--success)' : 'var(--warning)' }}>{locationOk ? 'Location captured' : loadingAudit ? 'Capturing location' : 'Location unavailable'}</div>
@@ -60,31 +60,27 @@ export function CheckInScreen({ ctx }: { ctx: Ctx }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 14, marginTop: 18, alignItems: 'flex-start' }}>
-        <SelfieTile captured={selfie} onToggle={() => setSelfie((s) => !s)} />
+      <div style={{ display: 'flex', gap: 14, marginTop: 12, alignItems: 'center' }}>
+        <SelfieTile captured={selfie} onToggle={() => setSelfie((s) => !s)} name={ctx.employeeName} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>Selfie verification</div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 3, lineHeight: 1.45 }}>{selfie ? 'Captured. Looks good — you can retake by tapping the photo.' : 'Optional. Tap the tile to capture a check-in selfie.'}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 3, lineHeight: 1.45 }}>{selfie ? 'Captured — tap the photo to retake.' : 'Optional. Tap the tile to capture a selfie.'}</div>
           {selfie && <div style={{ marginTop: 8 }}><Pill tone="success"><Icon name="check" size={12} color="var(--success)" strokeWidth={3} />Face matched</Pill></div>}
         </div>
       </div>
 
-      <div style={{ marginTop: 8 }}>
-        <Card pad={16} style={{ marginTop: 10 }}>
-          <VRow icon="mapPin" label="Location" value={locationText} ok={!!audit.location} />
-          <div style={{ height: 1, background: 'var(--hair)' }} />
-          <VRow icon="clock" label="Time" value={fmtClock(now) + ' IST'} ok={timeSynced} mono />
-          <div style={{ height: 1, background: 'var(--hair)' }} />
-          <VRow icon="wifi" label="Clock" value={clockText} ok={timeSynced} />
-          <div style={{ height: 1, background: 'var(--hair)' }} />
-          <VRow icon="wifi" label="Network IP" value={ipText} ok={!!audit.ip} mono />
-          <div style={{ height: 1, background: 'var(--hair)' }} />
-          <VRow icon="device" label="Device" value={audit.device} />
-        </Card>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 12, padding: '0 4px', color: 'var(--text-3)' }}>
-          <Icon name="shield" size={14} color="var(--text-3)" />
-          <span style={{ fontSize: 11.5, lineHeight: 1.4 }}>Location, device &amp; IP are recorded with this entry for audit. Encrypted in transit.</span>
-        </div>
+      <Card pad={14} style={{ marginTop: 12 }}>
+        <VRow icon="clock" label="Time" value={fmtClock(now)} ok={timeSynced} mono />
+        <div style={{ height: 1, background: 'var(--hair)' }} />
+        <VRow icon="mapPin" label="Location" value={locationText} ok={!!audit.location} />
+        <div style={{ height: 1, background: 'var(--hair)' }} />
+        <VRow icon="wifi" label="Network IP" value={ipText} ok={!!audit.ip} mono />
+        <div style={{ height: 1, background: 'var(--hair)' }} />
+        <VRow icon="device" label="Device" value={audit.device} />
+      </Card>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10, padding: '0 4px', color: 'var(--text-3)' }}>
+        <Icon name="shield" size={14} color="var(--text-3)" />
+        <span style={{ fontSize: 11.5, lineHeight: 1.4 }}>Location, device &amp; IP are recorded with this entry for audit.</span>
       </div>
     </Overlay>
   );
@@ -95,6 +91,9 @@ export function CheckOutScreen({ ctx }: { ctx: Ctx }) {
   const { closeOverlay, doCheckOut, fmtClock, fmtDur, checkInTime, elapsed, now, attendanceAudit, attendanceRows, timeSynced } = ctx;
   const latestAudit = attendanceRows[0];
   const clockText = timeSynced ? 'Online synced' : 'Using device time';
+  const fmtShort = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
+  const overtimeSecs = Math.max(0, elapsed - 8 * 3600);
+  const late = checkInTime ? (checkInTime.getHours() * 60 + checkInTime.getMinutes()) > 9 * 60 + 45 : false;
   return (
     <Overlay title="Check Out" onClose={closeOverlay} footer={<SlideToConfirm label="Slide to check out" tone="var(--success)" icon="arrowRight" onConfirm={doCheckOut} />}>
       <div style={{ borderRadius: 'var(--r-hero)', padding: 20, background: 'var(--hero)', color: '#fff', boxShadow: 'var(--hero-shadow)' }}>
@@ -113,11 +112,11 @@ export function CheckOutScreen({ ctx }: { ctx: Ctx }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
-        <Card pad={14}><div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Overtime</div><div style={{ fontSize: 20, fontWeight: 800, color: 'var(--success)', marginTop: 4 }}>+0:32</div></Card>
-        <Card pad={14}><div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Shift</div><div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', marginTop: 4 }}>On time</div></Card>
+        <Card pad={14}><div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Overtime</div><div style={{ fontSize: 20, fontWeight: 800, color: 'var(--success)', marginTop: 4 }}>+{fmtShort(overtimeSecs)}</div></Card>
+        <Card pad={14}><div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Shift</div><div style={{ fontSize: 20, fontWeight: 800, color: late ? 'var(--warning)' : 'var(--text-1)', marginTop: 4 }}>{late ? 'Late' : 'On time'}</div></Card>
       </div>
 
-      <div style={{ marginTop: 16 }}><MapView height={150} /></div>
+      <div style={{ marginTop: 16 }}><MapView height={150} label={attendanceAudit.location || latestAudit?.location || 'Current device location'} /></div>
       <Card pad={16} style={{ marginTop: 14 }}>
         <VRow icon="clock" label="Clock" value={clockText} ok={timeSynced} />
         <div style={{ height: 1, background: 'var(--hair)' }} />

@@ -4,6 +4,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import { Icon } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
 import { useAuth } from '../lib/auth';
+import { APP_NAME, VENDOR, APP_VERSION } from '../lib/brand';
 
 // ── Brand mark: rounded gradient tile + check ─────────────────────────
 function OnTimeMark({ size = 60, radius }: { size?: number; radius?: number }) {
@@ -172,8 +173,8 @@ function LoginScreen() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
             <OnTimeMark size={56} />
             <div>
-              <div style={{ fontSize: 25, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1, whiteSpace: 'nowrap' }}>On Time</div>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-3)', marginTop: 4, letterSpacing: '0.02em' }}>by CATaskKit</div>
+              <div style={{ fontSize: 25, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1, whiteSpace: 'nowrap' }}>{APP_NAME}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-3)', marginTop: 4, letterSpacing: '0.02em' }}>by {VENDOR}</div>
             </div>
           </div>
           <h1 style={{ margin: '34px 0 0', fontSize: 30, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.1 }}>{title}</h1>
@@ -279,7 +280,7 @@ function LoginScreen() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 16, color: 'var(--text-3)' }}>
             <Icon name="shield" size={13} color="var(--text-3)" />
-            <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '0.01em' }}>{configured ? 'Encrypted & secured · v2.4.1' : 'Demo mode · connect Supabase to go live'}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '0.01em' }}>{configured ? `Encrypted & secured · v${APP_VERSION}` : 'Demo mode · connect Supabase to go live'}</span>
           </div>
         </div>
       </div>

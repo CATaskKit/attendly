@@ -169,16 +169,19 @@ export default function EmployeeApp() {
     return audit;
   }, []);
 
-  const getPunchTime = useCallback(async () => {
-    if (!live) return new Date(now.getTime());
+  // Attendance is only recorded online: this resolves to trusted network time,
+  // or null when the device can't reach the internet (so we can block the punch
+  // instead of silently trusting the device clock).
+  const getPunchTime = useCallback(async (): Promise<Date | null> => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
     try {
       const synced = await fetchNetworkTime();
       return synced.at;
     } catch (error) {
       console.warn('Punch time sync failed', error);
-      return new Date(now.getTime());
+      return null;
     }
-  }, [live, now]);
+  }, []);
 
   const applyTodayState = useCallback((row: AttendanceRow | null) => {
     setAttendanceId(row?.id ?? null);
@@ -256,6 +259,7 @@ export default function EmployeeApp() {
     openOverlay: setOverlay, closeOverlay: () => setOverlay(null),
     doCheckIn: (audit = attendanceAudit) => {
       void getPunchTime().then((localTime) => {
+        if (!localTime) { showToast('You are not connected to the internet', 'x'); return; }
         setCheckInTime(localTime); setCheckOutTime(null); setStatus('in'); setOverlay(null); showToast('Checked in at ' + fmtClock(localTime));
         if (live && orgId) {
           checkIn(orgId, employee, { checkedAt: localTime.toISOString(), location: audit.location || undefined, ip: audit.ip || undefined, device: audit.device })
@@ -266,6 +270,7 @@ export default function EmployeeApp() {
     },
     doCheckOut: () => {
       void getPunchTime().then((out) => {
+        if (!out) { showToast('You are not connected to the internet', 'x'); return; }
         const seconds = checkInTime ? (out.getTime() - checkInTime.getTime()) / 1000 : 0;
         setCheckOutTime(out); setStatus('done'); setOverlay(null); showToast('Checked out at ' + fmtClock(out));
         if (live && attendanceId) refreshAttendanceAudit().then((audit) => checkOut(attendanceId, seconds, { checkedAt: out.toISOString(), location: audit.location || undefined, ip: audit.ip || undefined, device: audit.device })).then(reloadLive).catch(console.error);

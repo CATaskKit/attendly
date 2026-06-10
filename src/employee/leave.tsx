@@ -19,16 +19,21 @@ export function LeaveScreen({ ctx }: { ctx: Ctx }) {
     ? ctx.leaveBalances.map((b, i) => ({ name: b.type, icon: iconFor(b.type), avail: b.available, total: b.allotted, tone: tones[i % tones.length] }))
     : fallback;
   const totalBalance = balances.reduce((sum, b) => sum + b.avail, 0);
+  const pending = ctx.leaveRequests.filter((r) => r.status === 'Pending').length;
+  const typeCount = balances.length;
+  const subtitle = typeCount
+    ? `${fmtDays(totalBalance)} days available across ${typeCount} type${typeCount === 1 ? '' : 's'}`
+    : 'No leave types configured yet';
   return (
     <div>
-      <ScreenHeader title="Leave" subtitle="2 of 3 approvers respond same-day" />
+      <ScreenHeader title="Leave" subtitle={subtitle} />
       <Card pad={16}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
           <div>
             <div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Total balance</div>
             <div style={{ fontSize: 34, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{fmtDays(totalBalance)} <span style={{ fontSize: 16, color: 'var(--text-3)' }}>days</span></div>
           </div>
-          <Pill tone="success">+1.5 accrues monthly</Pill>
+          {pending > 0 ? <Pill tone="warning">{pending} pending</Pill> : <Pill tone="success">All up to date</Pill>}
         </div>
         <div style={{ display: 'flex', height: 10, borderRadius: 999, overflow: 'hidden', marginTop: 16, gap: 2 }}>
           {balances.map((b) => <div key={b.name} style={{ flex: Math.max(1, b.avail), background: `var(--${b.tone})` }} />)}
