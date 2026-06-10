@@ -27,7 +27,7 @@ type AuthContextValue = {
   role: Role;
   /** true when signed in (real) or in demo mode after a demo sign-in */
   authed: boolean;
-  signIn: (email: string, password: string) => Promise<{ error?: string }>;
+  signIn: (email: string, password: string) => Promise<{ error?: string; role?: Role; orgId?: string | null }>;
   signUp: (fullName: string, email: string, password: string) => Promise<{ error?: string }>;
   sendPasswordReset: (email: string) => Promise<{ error?: string }>;
   updatePassword: (password: string) => Promise<{ error?: string }>;
@@ -88,8 +88,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn: AuthContextValue['signIn'] = async (email, password) => {
     if (!supabase) { setDemo(true); return {}; }
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return error ? { error: error.message } : {};
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { error: error.message };
+    // Load the profile now so the caller can route by role (admin vs employee)
+    // without waiting on the async onAuthStateChange listener.
+    let prof: Profile | null = null;
+    if (data.user) {
+      const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
+      prof = (p as Profile) ?? null;
+      setProfile(prof);
+    }
+    return { role: prof?.role, orgId: prof?.org_id ?? null };
   };
 
   const signUp: AuthContextValue['signUp'] = async (fullName, email, password) => {

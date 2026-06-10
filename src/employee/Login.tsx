@@ -3,8 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import PhoneFrame from '../components/PhoneFrame';
 import { Icon } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
-import { useAuth } from '../lib/auth';
+import { useAuth, type Role } from '../lib/auth';
 import { APP_NAME, VENDOR, APP_VERSION } from '../lib/brand';
+
+// Where to land after auth, by role: owners/HR run the admin console; an owner
+// who hasn't created their org yet goes to onboarding; everyone else (managers,
+// employees) uses the employee app.
+function landingFor(role?: Role, orgId?: string | null): string {
+  if (role === 'owner' && !orgId) return '/onboarding';
+  if (role === 'owner' || role === 'hr') return '/admin';
+  return '/app';
+}
 
 // ── Brand mark: rounded gradient tile + check ─────────────────────────
 function OnTimeMark({ size = 60, radius }: { size?: number; radius?: number }) {
@@ -121,9 +130,9 @@ function LoginScreen() {
     }
 
     if (mode === 'signin') {
-      const { error } = await signIn(trimmedEmail, pw);
+      const { error, role, orgId } = await signIn(trimmedEmail, pw);
       if (error) { setFormError(error); setPhase('idle'); triggerShake(); return; }
-      navigate('/app');
+      navigate(landingFor(role, orgId));
     } else {
       const { error } = await signUp(fullName.trim(), trimmedEmail, pw);
       if (error) { setFormError(error); setPhase('idle'); triggerShake(); return; }
@@ -309,12 +318,16 @@ const loginStyles: Record<string, CSSProperties> = {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { authed } = useAuth();
+  const { authed, loading, role, profile } = useAuth();
   const vars = themeVars(DEFAULT_TWEAKS);
   const isResetLink = new URLSearchParams(window.location.search).has('reset-password');
 
-  // Already signed in → go straight to the app.
-  useEffect(() => { if (authed && !isResetLink) navigate('/app', { replace: true }); }, [authed, isResetLink, navigate]);
+  // Already signed in → route to the right home for the role (admins land in the
+  // admin console, everyone else in the employee app).
+  useEffect(() => {
+    if (loading || !authed || isResetLink) return;
+    navigate(landingFor(role, profile?.org_id ?? null), { replace: true });
+  }, [authed, loading, role, profile, isResetLink, navigate]);
 
   return (
     <PhoneFrame dark={DEFAULT_TWEAKS.dark}>
