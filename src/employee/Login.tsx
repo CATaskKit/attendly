@@ -3,13 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import PhoneFrame from '../components/PhoneFrame';
 import { Icon } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
+import { Capacitor } from '@capacitor/core';
 import { useAuth, type Role } from '../lib/auth';
 import { APP_NAME, VENDOR, APP_VERSION } from '../lib/brand';
 
-// Where to land after auth, by role: owners/HR run the admin console; an owner
-// who hasn't created their org yet goes to onboarding; everyone else (managers,
-// employees) uses the employee app.
+// Where to land after auth, by role. The admin console (and onboarding) are a
+// web-only desktop surface, so on the native mobile app everyone uses the
+// employee app. On the web, owners/HR run the admin console; an owner who
+// hasn't created their org yet goes to onboarding.
 function landingFor(role?: Role, orgId?: string | null): string {
+  if (Capacitor.isNativePlatform()) return '/app';
   if (role === 'owner' && !orgId) return '/onboarding';
   if (role === 'owner' || role === 'hr') return '/admin';
   return '/app';
