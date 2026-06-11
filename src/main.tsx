@@ -4,6 +4,7 @@ import { createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
 import './index.css';
 import { initNative } from './native';
 import { AuthProvider, useAuth, type Role } from './lib/auth';
+import { ErrorBoundary } from './lib/ErrorBoundary';
 import Login from './employee/Login';
 import EmployeeApp from './employee/EmployeeApp';
 import AdminApp from './admin/AdminApp';
@@ -35,8 +36,10 @@ void initNative();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <AuthProvider>
-      <RouterProvider router={router} />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );

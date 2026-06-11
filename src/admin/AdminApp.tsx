@@ -13,6 +13,7 @@ import {
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
+import { fetchBilling, startCheckout, openBillingPortal, planFor, seatLimit, trialDaysLeft, atSeatLimit, isActive, PRICE_PER_SEAT_LABEL, type OrgBilling } from '../lib/billing';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -20,13 +21,14 @@ const fmtRange = (a: string | null, b: string | null) => {
   return a === b ? f(a) : `${f(a)} – ${f(b)}`;
 };
 
-type Page = 'dashboard' | 'approvals' | 'employees' | 'holidays' | 'reports';
+type Page = 'dashboard' | 'approvals' | 'employees' | 'holidays' | 'reports' | 'billing';
 const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'dashboard', icon: 'grid', label: 'Dashboard' },
   { id: 'approvals', icon: 'inbox', label: 'Leave Approvals' },
   { id: 'employees', icon: 'users', label: 'Employees' },
   { id: 'holidays', icon: 'calendar', label: 'Holidays' },
   { id: 'reports', icon: 'download', label: 'Reports & export' },
+  { id: 'billing', icon: 'wallet', label: 'Billing' },
 ];
 
 export default function AdminApp() {
@@ -41,6 +43,7 @@ export default function AdminApp() {
   const [leave, setLeave] = useState<LeaveRow[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [billing, setBilling] = useState<OrgBilling | null>(null);
   const [toast, setToast] = useState<{ text: string; tone: string; icon: string } | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [search, setSearch] = useState('');
@@ -48,9 +51,12 @@ export default function AdminApp() {
   const fire = (text: string, tone = 'green', icon = 'checkCircle') => { setToast({ text, tone, icon }); setTimeout(() => setToast(null), 2600); };
 
   const reload = useCallback(async () => {
-    const [emp, lv, hol, st] = await Promise.all([listEmployees(), listLeave(), listHolidays(), dashboardStats()]);
-    setEmployees(emp); setLeave(lv); setHolidays(hol); setStats(st);
-  }, []);
+    const [emp, lv, hol, st, bill] = await Promise.all([
+      listEmployees(), listLeave(), listHolidays(), dashboardStats(),
+      orgId ? fetchBilling(orgId) : Promise.resolve(null),
+    ]);
+    setEmployees(emp); setLeave(lv); setHolidays(hol); setStats(st); setBilling(bill);
+  }, [orgId]);
 
   useEffect(() => {
     let active = true;
@@ -62,6 +68,22 @@ export default function AdminApp() {
 
   // Live updates: refresh whenever leave/attendance/employees change anywhere.
   useEffect(() => onTablesChange(['leave_requests', 'attendance', 'employees'], () => { void reload(); }), [reload]);
+
+  // Returning from Stripe Checkout (#/admin?billing=success|cancel): toast, land
+  // on Billing, refetch (the webhook updates the org row a beat later), clean URL.
+  useEffect(() => {
+    const m = window.location.hash.match(/[?&]billing=(success|cancel)/);
+    if (!m) return;
+    setPage('billing');
+    if (m[1] === 'success') {
+      fire('Subscription active — welcome to Growth!', 'green', 'checkCircle');
+      const t = setTimeout(() => { void reload(); }, 3500);
+      window.history.replaceState(null, '', window.location.href.replace(/[?&]billing=(success|cancel)/, ''));
+      return () => clearTimeout(t);
+    }
+    fire('Checkout canceled — no changes made', 'amber', 'wallet');
+    window.history.replaceState(null, '', window.location.href.replace(/[?&]billing=(success|cancel)/, ''));
+  }, [reload]);
 
   const onSeed = async () => {
     if (!orgId) return;
@@ -84,6 +106,11 @@ export default function AdminApp() {
 
   const onAddEmployee = async (e: Partial<Employee>) => {
     if (!orgId) return;
+    if (billing && atSeatLimit(billing, employees.length)) {
+      fire(`Seat limit reached on the ${planFor(billing).name} plan — upgrade to add more`, 'amber', 'wallet');
+      setPage('billing');
+      return;
+    }
     try { await addEmployee(orgId, e); await reload(); fire('Employee added'); }
     catch (err) { console.error(err); fire('Could not add employee', 'red', 'xCircle'); }
   };
@@ -165,11 +192,13 @@ export default function AdminApp() {
 
         <main style={{ flex: 1, overflowY: 'auto', padding: 28 }}>
           {loading ? <Spinner label="Loading your workspace…" />
-            : !canManage && employees.length === 0 ? <EmptyManager />
+            : page === 'billing' ? (
+              <Billing billing={billing} seatsUsed={employees.length} canManage={canManage} onToast={fire} />
+            ) : page === 'reports' ? (
+              <Reports orgId={orgId} onToast={fire} />
+            ) : !canManage && employees.length === 0 ? <EmptyManager />
             : employees.length === 0 && leave.length === 0 ? (
               <EmptyState seeding={seeding} canSeed={canManage} onSeed={onSeed} />
-            ) : page === 'dashboard' ? (
-              <Dashboard stats={stats} leave={shownLeave} onGo={setPage} onDecide={onDecide} />
             ) : page === 'approvals' ? (
               <Approvals leave={shownLeave} role={role} onDecide={onDecide} />
             ) : page === 'employees' ? (
@@ -177,7 +206,7 @@ export default function AdminApp() {
             ) : page === 'holidays' ? (
               <Holidays holidays={shownHolidays} canManage={canManage} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
             ) : (
-              <Reports orgId={orgId} onToast={fire} />
+              <Dashboard stats={stats} leave={shownLeave} onGo={setPage} onDecide={onDecide} />
             )}
         </main>
       </div>
@@ -569,6 +598,70 @@ function NotificationBell() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ── Billing (subscription) ────────────────────────────────────────────
+const whiteBtn: CSSProperties = { height: 40, padding: '0 18px', borderRadius: 11, border: 'none', background: '#fff', color: 'var(--accent-deep)', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
+
+function Billing({ billing, seatsUsed, canManage, onToast }: { billing: OrgBilling | null; seatsUsed: number; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!billing) return <Spinner label="Loading billing…" />;
+  const plan = planFor(billing);
+  const active = isActive(billing);
+  const limit = seatLimit(billing);
+  const limitText = limit === Infinity ? 'Unlimited' : String(limit);
+  const daysLeft = trialDaysLeft(billing);
+  const over = atSeatLimit(billing, seatsUsed);
+
+  const go = async (fn: () => Promise<void>, fail: string) => {
+    setBusy(true);
+    try { await fn(); } catch (e) { onToast(e instanceof Error ? e.message : fail, 'red', 'xCircle'); setBusy(false); }
+  };
+
+  return (
+    <div>
+      <PageHead title="Billing" sub="Your subscription, seats and invoices." />
+      <ACard style={{ background: 'linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 60%, var(--green)))', border: 'none', color: '#fff', position: 'relative', overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ position: 'absolute', top: -40, right: -30, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
+        <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, opacity: 0.9 }}>Current plan</span>
+            <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 999, padding: '2px 10px', fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>{billing.subscription_status}</span>
+          </div>
+          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-0.02em' }}>{plan.name}</div>
+          <div style={{ fontSize: 14, opacity: 0.9, marginTop: 4 }}>{active ? PRICE_PER_SEAT_LABEL : daysLeft > 0 ? `Free trial · ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : 'Free trial'}</div>
+          <div style={{ display: 'flex', gap: 28, marginTop: 20, flexWrap: 'wrap' }}>
+            {([['Seats used', `${seatsUsed} / ${limitText}`], ['Status', billing.subscription_status], ['Renews', billing.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—']] as const).map((s) => (
+              <div key={s[0]}><div style={{ fontSize: 12, opacity: 0.8 }}>{s[0]}</div><div style={{ fontSize: 17, fontWeight: 700, marginTop: 2, textTransform: s[0] === 'Status' ? 'capitalize' : 'none' }}>{s[1]}</div></div>
+            ))}
+          </div>
+          {canManage && (
+            <div style={{ display: 'flex', gap: 12, marginTop: 22 }}>
+              {!active
+                ? <button onClick={() => go(() => startCheckout(Math.max(seatsUsed, 1)), 'Billing is not configured yet')} disabled={busy} style={whiteBtn}>{busy ? 'Opening…' : 'Upgrade to Growth'}</button>
+                : <button onClick={() => go(() => openBillingPortal(), 'Billing is not configured yet')} disabled={busy} style={whiteBtn}>{busy ? 'Opening…' : 'Manage subscription'}</button>}
+            </div>
+          )}
+        </div>
+      </ACard>
+
+      <ACard>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Seat usage</div>
+          {over && <APill tone="amber">Seat limit reached</APill>}
+        </div>
+        <div style={{ height: 10, borderRadius: 999, background: 'var(--soft)', overflow: 'hidden', marginBottom: 8 }}>
+          <div style={{ width: `${limit === Infinity ? (seatsUsed ? 40 : 0) : Math.min(100, (seatsUsed / limit) * 100)}%`, height: '100%', background: over ? 'var(--amber)' : 'var(--accent)', borderRadius: 999 }} />
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600 }}>{seatsUsed} of {limitText} seats in use{!active ? ` · Trial allows up to ${limitText}` : ''}</div>
+      </ACard>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, color: 'var(--ink-3)' }}>
+        <AIcon name="shield" size={15} color="var(--ink-3)" />
+        <span style={{ fontSize: 12 }}>Billing is processed by Stripe. Connect Stripe (see SETUP.md) to enable upgrades.</span>
+      </div>
     </div>
   );
 }
