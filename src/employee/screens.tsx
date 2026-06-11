@@ -141,10 +141,10 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
           <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>{employeeName}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ position: 'relative', width: 42, height: 42, borderRadius: '50%', background: 'var(--card)', border: 'var(--card-border)', boxShadow: 'var(--card-shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <button onClick={() => openOverlay('notifications')} style={{ position: 'relative', width: 42, height: 42, borderRadius: '50%', background: 'var(--card)', border: 'var(--card-border)', boxShadow: 'var(--card-shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
             <Icon name="bell" size={20} color="var(--text-2)" />
-            <span style={{ position: 'absolute', top: 9, right: 11, width: 7, height: 7, borderRadius: '50%', background: 'var(--danger)', border: '1.5px solid var(--card)' }} />
-          </div>
+            {ctx.unreadCount > 0 && <span style={{ position: 'absolute', top: 5, right: 6, minWidth: 16, height: 16, padding: '0 3px', borderRadius: 999, background: 'var(--danger)', color: '#fff', fontSize: 9.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--card)' }}>{ctx.unreadCount}</span>}
+          </button>
           <Avatar name={employeeName} size={42} accent="var(--accent)" />
         </div>
       </div>

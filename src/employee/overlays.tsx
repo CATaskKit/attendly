@@ -401,6 +401,47 @@ function DateField({ label, value, dim, onChange }: { label: string; value: stri
   );
 }
 
+// ── Notifications ────────────────────────────────────────────────────
+export function NotificationsScreen({ ctx }: { ctx: Ctx }) {
+  const { notifications, unreadCount, markAllRead, markOneRead, closeOverlay } = ctx;
+  const fmtTime = (iso: string) => {
+    const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+  };
+  const iconFor = (type: string) => (type.startsWith('leave') ? 'leave' : 'bell');
+  return (
+    <Overlay title="Notifications" onClose={closeOverlay}
+      footer={unreadCount > 0 ? <button onClick={markAllRead} style={primaryBtn}>Mark all read</button> : undefined}>
+      {notifications.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-3)' }}>
+          <Icon name="bell" size={34} color="var(--text-3)" />
+          <div style={{ marginTop: 12, fontSize: 14.5, fontWeight: 700, color: 'var(--text-2)' }}>No notifications</div>
+          <div style={{ fontSize: 12.5, marginTop: 4 }}>Approvals and updates show up here.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {notifications.map((n) => (
+            <Card key={n.id} pad={14} onClick={() => markOneRead(n.id)} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', background: n.read ? 'var(--card)' : 'var(--accent-soft)' }}>
+              <div style={{ width: 38, height: 38, borderRadius: 11, flexShrink: 0, background: 'var(--card)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={iconFor(n.type)} size={19} color="var(--accent)" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{n.title}</div>
+                {n.body && <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.4 }}>{n.body}</div>}
+                <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 4 }}>{fmtTime(n.created_at)}</div>
+              </div>
+              {!n.read && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />}
+            </Card>
+          ))}
+        </div>
+      )}
+    </Overlay>
+  );
+}
+
 // ── Logout confirmation sheet ────────────────────────────────────────
 export function LogoutConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   return (

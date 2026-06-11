@@ -10,7 +10,7 @@ import {
   dashboardStats, hasEmployees, seedSampleData, getOrganization,
   type Employee, type LeaveRow, type Holiday, type Stats,
 } from '../lib/api';
-import { fetchExportData, downloadWorkbook, SHEETS, type ExportData } from '../lib/export';
+import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
 
@@ -458,8 +458,14 @@ function Reports({ orgId, onToast }: { orgId: string | null; onToast: (t: string
   const onDownload = async () => {
     setBusy(true);
     try {
-      const d = await fetchExportData();
-      downloadWorkbook(d, orgName);
+      try {
+        // Prefer the server-side Edge Function (scales to large datasets)…
+        await downloadWorkbookServer(orgName);
+      } catch {
+        // …fall back to building it in the browser if it's not deployed.
+        const d = await fetchExportData();
+        downloadWorkbook(d, orgName);
+      }
       onToast('Workbook downloaded');
     } catch (e) { console.error(e); onToast('Export failed', 'red', 'xCircle'); }
     finally { setBusy(false); }

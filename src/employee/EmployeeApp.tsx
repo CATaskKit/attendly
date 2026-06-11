@@ -7,6 +7,7 @@ import {
   type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow,
 } from '../lib/api';
 import { onTablesChange } from '../lib/realtime';
+import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
@@ -14,7 +15,7 @@ import { collectAttendanceAudit, getDeviceInfo, type AttendanceAudit } from '../
 import { fetchNetworkTime, formatAppDate, APP_TIME_ZONE } from '../lib/networkTime';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
-import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm } from './overlays';
+import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen } from './overlays';
 import { INITIAL_LEAVE, INITIAL_TEAM, type Ctx, type LeaveRequest, type Status, type TeamRequest } from './data';
 
 const isoDate = (d: Date) => formatAppDate(d);
@@ -225,6 +226,21 @@ export default function EmployeeApp() {
     if (!live) return;
     return onTablesChange(['leave_requests', 'attendance'], () => { void reloadLive(); });
   }, [live, reloadLive]);
+
+  // Notifications (live).
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const loadNotifications = useCallback(async () => {
+    if (!live) { setNotifications([]); return; }
+    try { setNotifications(await listNotifications()); } catch (e) { console.error(e); }
+  }, [live]);
+  useEffect(() => { void loadNotifications(); }, [loadNotifications]);
+  useEffect(() => {
+    if (!live) return;
+    return onTablesChange(['notifications'], () => { void loadNotifications(); });
+  }, [live, loadNotifications]);
+  const unreadCount = notifications.filter((n) => !n.read).length;
+  const markAllRead = () => { void markAllNotificationsRead().then(loadNotifications).catch(console.error); };
+  const markOneRead = (id: string) => { void markNotificationRead(id).then(loadNotifications).catch(console.error); };
   useEffect(() => {
     if (live) return;
     setEmployee(null);
@@ -343,6 +359,7 @@ export default function EmployeeApp() {
     logout: () => { void signOut().then(() => navigate('/')); },
     role,
     goAdmin: () => navigate('/admin'),
+    notifications, unreadCount, markAllRead, markOneRead,
   };
 
   const vars = themeVars(t);
@@ -367,6 +384,7 @@ export default function EmployeeApp() {
         {overlay === 'checkin' && <CheckInScreen ctx={ctx} />}
         {overlay === 'checkout' && <CheckOutScreen ctx={ctx} />}
         {overlay === 'applyleave' && <ApplyLeaveScreen ctx={ctx} />}
+        {overlay === 'notifications' && <NotificationsScreen ctx={ctx} />}
         {overlay === 'logout' && <LogoutConfirm onCancel={ctx.closeOverlay} onConfirm={ctx.logout} />}
 
         <Toast show={!!toast} text={toast?.text} icon={toast?.icon || 'checkCircle'} />

@@ -48,6 +48,35 @@ function autoWidths(rows: Record<string, unknown>[]): { wch: number }[] {
   });
 }
 
+/**
+ * Server-side export via the `export-report` Edge Function. Builds the workbook
+ * on Supabase (paginated, RLS-scoped) and downloads the bytes — keeps large
+ * exports off the browser. Throws if the function isn't deployed/reachable, so
+ * callers can fall back to the client-side build.
+ */
+export async function downloadWorkbookServer(orgName: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const base = import.meta.env.VITE_SUPABASE_URL as string;
+  const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+  const res = await fetch(`${base}/functions/v1/export-report`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.access_token}`, apikey: anon },
+  });
+  if (!res.ok) throw new Error(`Server export failed (${res.status})`);
+  const blob = await res.blob();
+  const stamp = new Date().toISOString().slice(0, 10);
+  const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'Attendly';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${safe}_HR_Export_${stamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
 export function downloadWorkbook(data: ExportData, orgName: string): void {
   const wb = XLSX.utils.book_new();
 

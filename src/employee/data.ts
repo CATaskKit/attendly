@@ -1,5 +1,5 @@
 // Demo data + shared context types for the employee app.
-import type { AttendanceRow, Employee, Holiday, LeaveBalance } from '../lib/api';
+import type { AttendanceRow, Employee, Holiday, LeaveBalance, Notification } from '../lib/api';
 import type { AttendanceAudit } from '../lib/attendanceAudit';
 
 export type LeaveRequest = {
@@ -77,4 +77,8 @@ export type Ctx = {
   logout: () => void;
   role?: string;
   goAdmin?: () => void;
+  notifications: Notification[];
+  unreadCount: number;
+  markAllRead: () => void;
+  markOneRead: (id: string) => void;
 };
