@@ -32,6 +32,8 @@ const A_ICONS: Record<string, string> = {
   shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10',
   trash: 'M3 6h18 M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2 M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6 M10 11v6 M14 11v6',
   sparkles: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z M5 3v4 M3 5h4 M19 17v4 M17 19h4',
+  receipt: 'M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1Z M8 8h8 M8 12h8 M8 16h5',
+  paperclip: 'M21.4 11.05 12.25 20.2a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 0 1 4.24 4.24l-9.2 9.19a1 1 0 0 1-1.41-1.41l8.49-8.49',
 };
 
 export function AIcon({ name, size = 20, color = 'currentColor', sw = 1.7, style }: { name: string; size?: number; color?: string; sw?: number; style?: CSSProperties }) {

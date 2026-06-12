@@ -47,6 +47,7 @@ export const ICONS: Record<string, string> = {
   faceId: 'M4 8V6a2 2 0 0 1 2-2h2 M16 4h2a2 2 0 0 1 2 2v2 M20 16v2a2 2 0 0 1-2 2h-2 M8 20H6a2 2 0 0 1-2-2v-2 M9 9v1.5 M15 9v1.5 M12 9v3.5h-1.2 M9.2 15.2a4 4 0 0 0 5.6 0',
   building: 'M3 21h18 M5 21V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v16 M15 21V9h3a1 1 0 0 1 1 1v11 M8.5 8h.01 M11.5 8h.01 M8.5 12h.01 M11.5 12h.01 M8.5 16h.01 M11.5 16h.01',
   globe: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M2 12h20 M12 2a15 15 0 0 1 0 20 M12 2a15 15 0 0 0 0 20',
+  receipt: 'M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1Z M8 8h8 M8 12h8 M8 16h5',
 };
 
 export type IconName = keyof typeof ICONS | string;

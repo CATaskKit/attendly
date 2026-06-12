@@ -19,6 +19,13 @@ export const FREE_SEAT_LIMIT = 5;
 export const PERIOD_DAYS = 365;
 const YEAR_MS = PERIOD_DAYS * 86400000;
 
+// Optional paid add-on: Reimbursement / convenience claims, ₹/employee/month.
+export const REIMBURSEMENT_RATE = 5;
+/** Annual add-on price in INR for `seats` employees (₹5 × seats × 12). */
+export function addonAnnual(seats: number): number {
+  return REIMBURSEMENT_RATE * seats * 12;
+}
+
 export const PLANS = {
   free: { key: 'free', name: 'Free (up to 5)', seatLimit: FREE_SEAT_LIMIT },
   growth: { key: 'growth', name: 'Growth', seatLimit: Infinity },
@@ -44,6 +51,8 @@ export type OrgBilling = {
   seats: number | null;
   trial_ends_at: string | null;
   current_period_end: string | null;
+  reimbursement_enabled: boolean;
+  reimbursement_require_manager: boolean;
 };
 
 /** The org's 1-year period is still open (free or paid). */
@@ -85,23 +94,41 @@ export function atSeatLimit(b: Pick<OrgBilling, 'subscription_status' | 'current
   return seatsUsed >= seatLimit(b);
 }
 
-export type Quote = { amount: number; prorated: boolean; renewal: boolean; periodEnd: Date; annualAtRenewal: number };
+/** Reimbursement add-on is paid for and inside an open period. */
+export function reimbursementActive(b: Pick<OrgBilling, 'reimbursement_enabled' | 'current_period_end'>): boolean {
+  return !!b.reimbursement_enabled && periodValid(b);
+}
+
+export type Quote = { amount: number; addonAmount: number; prorated: boolean; renewal: boolean; periodEnd: Date; annualAtRenewal: number };
 /**
- * What it costs *right now* to run `newSeats` employees. Inside an open period
- * we charge only the additional cost (new tier total − already-paid total),
+ * What it costs *right now* to run `newSeats` employees (and optionally enable
+ * the reimbursement add-on). Inside an open period we charge only the additional
+ * cost — the seat delta plus, if newly enabling reimbursement, ₹5×seats×12 —
  * prorated for the days left, keeping the same period end. Once the period has
  * lapsed it's a full fresh year. Mirror of the server in create-order.
  */
-export function quoteFor(b: Pick<OrgBilling, 'subscription_status' | 'current_period_end' | 'seats'>, newSeats: number): Quote {
+export function quoteFor(
+  b: Pick<OrgBilling, 'subscription_status' | 'current_period_end' | 'seats' | 'reimbursement_enabled'>,
+  newSeats: number,
+  reimbursement?: boolean,
+): Quote {
   const valid = periodValid(b);
-  const frac = periodFraction(b);
-  const base = valid ? annualTotal(newSeats) - annualTotal(currentPaidSeats(b)) : annualTotal(newSeats);
+  const frac = valid ? periodFraction(b) : 1;
+  const alreadyReimb = reimbursementActive(b);
+  const wantReimb = reimbursement ?? alreadyReimb;
+
+  const seatYr = valid ? annualTotal(newSeats) - annualTotal(currentPaidSeats(b)) : annualTotal(newSeats);
+  const addonYr = valid
+    ? (wantReimb && !alreadyReimb ? addonAnnual(newSeats) : 0) // enabling within the period
+    : (wantReimb ? addonAnnual(newSeats) : 0);                  // fresh year includes it if wanted
+
   return {
-    amount: Math.max(0, Math.round(base * frac)),
+    amount: Math.max(0, Math.round((seatYr + addonYr) * frac)),
+    addonAmount: Math.max(0, Math.round(addonYr * frac)),
     prorated: valid && frac < 1,
     renewal: !valid,
     periodEnd: valid ? new Date(b.current_period_end!) : new Date(Date.now() + YEAR_MS),
-    annualAtRenewal: annualTotal(newSeats),
+    annualAtRenewal: annualTotal(newSeats) + (wantReimb ? addonAnnual(newSeats) : 0),
   };
 }
 
@@ -114,13 +141,20 @@ export async function fetchBilling(orgId: string): Promise<OrgBilling | null> {
   if (!isSupabaseConfigured) {
     // Demo mode: a free org with a fresh 1-year period so Billing renders.
     const periodEnd = new Date(Date.now() + YEAR_MS).toISOString();
-    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd };
+    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd, reimbursement_enabled: false, reimbursement_require_manager: true };
   }
-  const { data, error } = await db().from('organizations')
+  const full = await db().from('organizations')
+    .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager')
+    .eq('id', orgId).single();
+  if (!full.error) return (full.data as OrgBilling) ?? null;
+
+  // Reimbursement columns land in migration 0006 — until it's run, fall back to
+  // the base billing columns so the Billing page keeps working.
+  const base = await db().from('organizations')
     .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end')
     .eq('id', orgId).single();
-  if (error) throw error;
-  return (data as OrgBilling) ?? null;
+  if (base.error) throw base.error;
+  return base.data ? { ...(base.data as Omit<OrgBilling, 'reimbursement_enabled' | 'reimbursement_require_manager'>), reimbursement_enabled: false, reimbursement_require_manager: true } : null;
 }
 
 export type PaymentRow = { id: string; amount_inr: number; seats: number; period_end: string; created_at: string };
@@ -185,8 +219,8 @@ function loadRazorpay(): Promise<void> {
  * netbanking), and on success the payment is verified server-side which raises
  * the org's seat cap (and, on renewal, extends the period by a year).
  */
-export async function startCheckout(seats: number): Promise<void> {
-  const order = await invokeFn<{ orderId: string; keyId: string; amount: number; currency: string; seats: number; renewal: boolean }>('create-order', { seats });
+export async function startCheckout(seats: number, reimbursement = false): Promise<void> {
+  const order = await invokeFn<{ orderId: string; keyId: string; amount: number; currency: string; seats: number; renewal: boolean }>('create-order', { seats, reimbursement });
   await loadRazorpay();
   await new Promise<void>((resolve, reject) => {
     const rzp = new window.Razorpay!({

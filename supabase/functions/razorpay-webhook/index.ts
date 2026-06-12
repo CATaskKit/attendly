@@ -28,6 +28,8 @@ Deno.serve(async (req) => {
     const payment = event.payload?.payment?.entity;
     const orgId = order?.notes?.org_id;
     const seats = parseInt(order?.notes?.seats ?? '0', 10) || null;
+    const reimbursement = order?.notes?.reimbursement === 'true';
+    const paidSeats = (seats ?? 0) > 5;
     if (!orgId || !payment?.id) return new Response(JSON.stringify({ received: true, skipped: 'missing org/payment' }), { headers: { 'Content-Type': 'application/json' } });
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -48,9 +50,10 @@ Deno.serve(async (req) => {
       period_end: periodEnd,
     });
     await admin.from('organizations').update({
-      plan: 'growth',
-      subscription_status: 'active',
+      plan: paidSeats ? 'growth' : 'free',
+      subscription_status: paidSeats ? 'active' : 'free',
       seats,
+      reimbursement_enabled: reimbursement,
       razorpay_order_id: order.id,
       razorpay_payment_id: payment.id,
       current_period_end: periodEnd,

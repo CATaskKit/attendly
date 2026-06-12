@@ -7,15 +7,16 @@ import {
 } from './ui';
 import {
   listEmployees, addEmployee, deleteEmployee, listLeave, decideLeave, listHolidays, addHoliday, deleteHoliday,
-  dashboardStats, hasEmployees, seedSampleData, getOrganization,
-  type Employee, type LeaveRow, type Holiday, type Stats,
+  dashboardStats, hasEmployees, seedSampleData, getOrganization, updateOrganization, listReimbursements,
+  type Employee, type LeaveRow, type Holiday, type Stats, type Reimbursement,
 } from '../lib/api';
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
-import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, type OrgBilling, type PaymentRow } from '../lib/billing';
+import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, type OrgBilling, type PaymentRow } from '../lib/billing';
 import Settings from './Settings';
 import { AttendanceMIS, PayrollMIS } from './mis';
+import { Reimbursements } from './reimbursements';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -23,7 +24,7 @@ const fmtRange = (a: string | null, b: string | null) => {
   return a === b ? f(a) : `${f(a)} – ${f(b)}`;
 };
 
-type Page = 'dashboard' | 'approvals' | 'employees' | 'attendance' | 'holidays' | 'payroll' | 'reports' | 'settings' | 'billing';
+type Page = 'dashboard' | 'approvals' | 'employees' | 'attendance' | 'holidays' | 'payroll' | 'reimbursements' | 'reports' | 'settings' | 'billing';
 const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'dashboard', icon: 'grid', label: 'Dashboard' },
   { id: 'approvals', icon: 'inbox', label: 'Leave Approvals' },
@@ -31,6 +32,7 @@ const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'attendance', icon: 'clock', label: 'Attendance MIS' },
   { id: 'holidays', icon: 'calendar', label: 'Holidays' },
   { id: 'payroll', icon: 'briefcase', label: 'Payroll' },
+  { id: 'reimbursements', icon: 'receipt', label: 'Reimbursements' },
   { id: 'reports', icon: 'download', label: 'Reports & export' },
   { id: 'settings', icon: 'settings', label: 'Settings' },
   { id: 'billing', icon: 'wallet', label: 'Billing' },
@@ -49,6 +51,7 @@ export default function AdminApp() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [billing, setBilling] = useState<OrgBilling | null>(null);
+  const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [toast, setToast] = useState<{ text: string; tone: string; icon: string } | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [search, setSearch] = useState('');
@@ -56,11 +59,12 @@ export default function AdminApp() {
   const fire = (text: string, tone = 'green', icon = 'checkCircle') => { setToast({ text, tone, icon }); setTimeout(() => setToast(null), 2600); };
 
   const reload = useCallback(async () => {
-    const [emp, lv, hol, st, bill] = await Promise.all([
+    const [emp, lv, hol, st, bill, reimb] = await Promise.all([
       listEmployees(), listLeave(), listHolidays(), dashboardStats(),
       orgId ? fetchBilling(orgId) : Promise.resolve(null),
+      listReimbursements().catch(() => [] as Reimbursement[]),
     ]);
-    setEmployees(emp); setLeave(lv); setHolidays(hol); setStats(st); setBilling(bill);
+    setEmployees(emp); setLeave(lv); setHolidays(hol); setStats(st); setBilling(bill); setReimbursements(reimb);
   }, [orgId]);
 
   useEffect(() => {
@@ -72,7 +76,7 @@ export default function AdminApp() {
   }, [reload]);
 
   // Live updates: refresh whenever leave/attendance/employees change anywhere.
-  useEffect(() => onTablesChange(['leave_requests', 'attendance', 'employees'], () => { void reload(); }), [reload]);
+  useEffect(() => onTablesChange(['leave_requests', 'attendance', 'employees', 'reimbursements'], () => { void reload(); }), [reload]);
 
   const onSeed = async () => {
     if (!orgId) return;
@@ -191,6 +195,8 @@ export default function AdminApp() {
               <AttendanceMIS orgId={orgId} employees={employees} leave={leave} />
             ) : page === 'payroll' ? (
               <PayrollMIS orgId={orgId} employees={employees} leave={leave} canManage={canManage} onToast={fire} />
+            ) : page === 'reimbursements' ? (
+              <Reimbursements rows={reimbursements} role={role} billing={billing} onChanged={() => { void reload(); }} onToast={fire} onGoBilling={() => setPage('billing')} />
             ) : !canManage && employees.length === 0 ? <EmptyManager />
             : employees.length === 0 && leave.length === 0 ? (
               <EmptyState seeding={seeding} canSeed={canManage} onSeed={onSeed} />
@@ -605,6 +611,7 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
   const [busy, setBusy] = useState(false);
   const [seats, setSeats] = useState(0);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const [reqMgr, setReqMgr] = useState(true);
 
   useEffect(() => {
     if (billing) setSeats((s) => s || Math.max(FREE_SEAT_LIMIT + 1, seatsUsed, billing.seats ?? 0));
@@ -612,6 +619,9 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
   useEffect(() => {
     if (billing?.id) listPayments(billing.id).then(setPayments).catch(() => {});
   }, [billing?.id]);
+  useEffect(() => {
+    if (billing) setReqMgr(billing.reimbursement_require_manager);
+  }, [billing?.reimbursement_require_manager]);
 
   if (!billing) return <Spinner label="Loading billing…" />;
   const paid = isPaid(billing);
@@ -625,18 +635,30 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
   const quote = quoteFor(billing, qty);
   const periodEndText = billing.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—';
   const statusText = paid ? 'active' : billing.subscription_status === 'active' ? 'expired' : 'free';
+  const reimbActive = reimbursementActive(billing);
+  // The add-on is priced on the real headcount (incl. free orgs ≤5), not the
+  // seat-purchase minimum of 6.
+  const addonSeats = paid ? (billing.seats ?? Math.max(seatsUsed, 1)) : Math.max(seatsUsed, 1);
+  const addonQuote = quoteFor(billing, addonSeats, true);
 
-  const pay = async () => {
+  const checkout = async (chkSeats: number, reimbursement: boolean, ok: string) => {
     setBusy(true);
     try {
-      await startCheckout(qty);
-      onToast(quote.renewal ? `Payment received — ${qty} seats for 1 year` : `Payment received — seats raised to ${qty}`, 'green', 'checkCircle');
+      await startCheckout(chkSeats, reimbursement);
+      onToast(ok, 'green', 'checkCircle');
       onRefresh();
       listPayments(billing.id).then(setPayments).catch(() => {});
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Payment failed';
       onToast(msg, msg.toLowerCase().includes('cancel') ? 'amber' : 'red', msg.toLowerCase().includes('cancel') ? 'wallet' : 'xCircle');
     } finally { setBusy(false); }
+  };
+  const pay = () => checkout(qty, false, quote.renewal ? `Payment received — ${qty} seats for 1 year` : `Payment received — seats raised to ${qty}`);
+
+  const toggleReqMgr = async (val: boolean) => {
+    setReqMgr(val);
+    try { await updateOrganization(billing.id, { reimbursement_require_manager: val }); onRefresh(); }
+    catch { setReqMgr(!val); onToast('Could not update setting', 'red', 'xCircle'); }
   };
 
   return (
@@ -706,6 +728,43 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
           </div>
         </ACard>
       )}
+
+      <ACard style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AIcon name="receipt" size={19} color="var(--accent)" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Reimbursement add-on</div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Expense claims with receipts, approvals & payouts · ₹{REIMBURSEMENT_RATE} / employee / month</div>
+          </div>
+          {reimbActive && <APill tone="green"><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />Active</APill>}
+        </div>
+        {reimbActive ? (
+          <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: canManage ? 'pointer' : 'default' }}>
+              <input type="checkbox" checked={reqMgr} disabled={!canManage} onChange={(e) => toggleReqMgr(e.target.checked)} style={{ width: 17, height: 17, accentColor: 'var(--accent)', cursor: canManage ? 'pointer' : 'default' }} />
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-1)' }}>Require manager approval before HR</span>
+            </label>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6, marginLeft: 27 }}>
+              {reqMgr ? 'Claims route Employee → Manager → HR → paid (employees without a manager skip to HR).' : 'Claims route Employee → HR → paid (manager step skipped).'}
+            </div>
+          </div>
+        ) : canManage ? (
+          <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 14, color: 'var(--ink-2)', fontWeight: 600 }}>
+              {addonSeats} employee{addonSeats === 1 ? '' : 's'} →
+              {addonQuote.prorated
+                ? <> <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(addonQuote.addonAmount)}</span> now <span style={{ color: 'var(--ink-3)' }}>(prorated to {addonQuote.periodEnd.toLocaleDateString()})</span></>
+                : <> <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(addonQuote.addonAmount)}</span> {addonQuote.renewal ? '/ year' : 'now'}</>}
+            </div>
+            <button onClick={() => checkout(addonSeats, true, 'Reimbursement add-on enabled')} disabled={busy || addonQuote.addonAmount <= 0} style={{ ...payBtn, opacity: busy || addonQuote.addonAmount <= 0 ? 0.7 : 1 }}>{busy ? 'Processing…' : `Enable · ${fmtINR(addonQuote.addonAmount)}`}</button>
+            <div style={{ width: '100%', fontSize: 12, color: 'var(--ink-3)' }}>Then renews at {fmtINR(addonAnnual(addonSeats))}/year with your plan.</div>
+          </div>
+        ) : (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--ink-3)' }}>Ask an owner or HR admin to enable this add-on.</div>
+        )}
+      </ACard>
 
       {payments.length > 0 && (
         <ACard style={{ marginBottom: 16 }}>

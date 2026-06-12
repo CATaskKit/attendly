@@ -52,6 +52,8 @@ Deno.serve(async (req) => {
     }
 
     const seats = parseInt(order?.notes?.seats ?? '0', 10) || null;
+    const reimbursement = order?.notes?.reimbursement === 'true';
+    const paidSeats = (seats ?? 0) > 5; // ≤5 stays free-tier even with the add-on
     // create-order decided the period end (kept for an upgrade, extended a year
     // for a renewal); fall back to a fresh year if an older order lacks it.
     const periodEnd = order?.notes?.period_end ?? new Date(Date.now() + 365 * 86400000).toISOString();
@@ -68,15 +70,16 @@ Deno.serve(async (req) => {
     }, { onConflict: 'payment_id', ignoreDuplicates: true });
 
     await admin.from('organizations').update({
-      plan: 'growth',
-      subscription_status: 'active',
+      plan: paidSeats ? 'growth' : 'free',
+      subscription_status: paidSeats ? 'active' : 'free',
       seats,
+      reimbursement_enabled: reimbursement,
       razorpay_order_id,
       razorpay_payment_id,
       current_period_end: periodEnd,
     }).eq('id', profile.org_id);
 
-    return json({ ok: true, seats, current_period_end: periodEnd });
+    return json({ ok: true, seats, reimbursement, current_period_end: periodEnd });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'verification failed' }, 400);
   }

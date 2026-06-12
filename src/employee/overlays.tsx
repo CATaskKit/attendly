@@ -3,6 +3,9 @@ import { Icon, Card, Pill, SlideToConfirm } from './ui';
 import { MapView, VRow, SelfieTile } from './screens';
 import type { Ctx } from './data';
 import { APP_NAME } from '../lib/brand';
+import { signedReceiptUrl } from '../lib/api';
+import { fmtINR } from '../lib/billing';
+import { downloadReimbursementsZip } from '../lib/zip';
 
 const fieldLabel: CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 9, letterSpacing: '0.01em' };
 const primaryBtn: CSSProperties = { width: '100%', height: 54, borderRadius: 'var(--r-btn)', border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 16, boxShadow: '0 6px 18px var(--accent-glow)' };
@@ -436,6 +439,138 @@ export function NotificationsScreen({ ctx }: { ctx: Ctx }) {
               {!n.read && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: 6 }} />}
             </Card>
           ))}
+        </div>
+      )}
+    </Overlay>
+  );
+}
+
+// ── Reimbursements ───────────────────────────────────────────────────
+const REIMB_CATEGORIES = [
+  { id: 'Travel', icon: 'mapPin' },
+  { id: 'Food', icon: 'coffee' },
+  { id: 'Convenience', icon: 'bolt' },
+  { id: 'Supplies', icon: 'briefcase' },
+  { id: 'Other', icon: 'file' },
+];
+const reimbTone = (s: string): 'accent' | 'success' | 'danger' | 'warning' =>
+  s === 'Paid' ? 'accent' : s === 'Approved' ? 'success' : s === 'Rejected' ? 'danger' : 'warning';
+
+export function ReimbursementsScreen({ ctx }: { ctx: Ctx }) {
+  const { closeOverlay, reimbursements, reimbursementEnabled, submitReimbursement } = ctx;
+  const [mode, setMode] = useState<'list' | 'new'>('list');
+  const [category, setCategory] = useState('Travel');
+  const [amount, setAmount] = useState('');
+  const [spentOn, setSpentOn] = useState(new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [downloading, setDownloading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = (list: FileList | null) => { const fs = Array.from(list || []); if (fs.length) setFiles((a) => [...a, ...fs].slice(0, 8)); };
+  const amt = Number(amount) || 0;
+  const canSubmit = reimbursementEnabled && amt > 0;
+
+  const downloadMine = async () => {
+    if (!reimbursements.length) return;
+    setDownloading(true);
+    try { await downloadReimbursementsZip(reimbursements, signedReceiptUrl, 'my-reimbursements'); }
+    catch (e) { console.error(e); }
+    finally { setDownloading(false); }
+  };
+
+  if (mode === 'new') {
+    return (
+      <Overlay title="New claim" onClose={() => setMode('list')}
+        footer={<button disabled={!canSubmit} onClick={() => submitReimbursement({ category, amount: amt, spentOn, reason, files })} style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.55, cursor: canSubmit ? 'pointer' : 'not-allowed' }}>Submit claim</button>}>
+        <label style={fieldLabel}>Category</label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+          {REIMB_CATEGORIES.map((c) => {
+            const on = category === c.id;
+            return (
+              <button key={c.id} onClick={() => setCategory(c.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 13px', borderRadius: 999, border: on ? '1.5px solid var(--accent)' : '1.5px solid var(--hair)', background: on ? 'var(--accent-soft)' : 'var(--card)', color: on ? 'var(--accent)' : 'var(--text-2)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer' }}>
+                <Icon name={c.icon} size={16} color={on ? 'var(--accent)' : 'var(--text-3)'} />{c.id}
+              </button>
+            );
+          })}
+        </div>
+
+        <label style={fieldLabel}>Amount (₹)</label>
+        <input type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', height: 52, borderRadius: 'var(--r-card)', border: 'var(--card-border)', background: 'var(--card)', padding: '0 16px', fontSize: 18, fontWeight: 800, color: 'var(--text-1)', marginBottom: 18, outline: 'none' }} />
+
+        <label style={fieldLabel}>Date of expense</label>
+        <div style={{ marginBottom: 18 }}><DateField label="Spent on" value={spentOn} onChange={setSpentOn} /></div>
+
+        <label style={fieldLabel}>Reason</label>
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="What was this expense for?" rows={3} style={{ width: '100%', boxSizing: 'border-box', resize: 'none', borderRadius: 'var(--r-card)', border: 'var(--card-border)', background: 'var(--card)', padding: 14, fontSize: 14.5, fontFamily: 'inherit', color: 'var(--text-1)', marginBottom: 18, outline: 'none' }} />
+
+        <label style={fieldLabel}>Receipts <span style={{ color: 'var(--text-3)', fontWeight: 500 }}>· attach bills</span></label>
+        <input ref={fileRef} type="file" accept=".pdf,image/*" multiple style={{ display: 'none' }} onChange={(e) => addFiles(e.target.files)} />
+        {files.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+            {files.map((f, i) => <AttachRow key={i} file={{ name: f.name, size: f.size, kind: fileKind(f.name) }} onRemove={() => setFiles((a) => a.filter((_, idx) => idx !== i))} />)}
+          </div>
+        )}
+        <button onClick={() => fileRef.current?.click()} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: 14, borderRadius: 'var(--r-card)', cursor: 'pointer', border: '1.5px dashed var(--hair)', background: 'var(--card)', textAlign: 'left' }}>
+          <div style={{ width: 38, height: 38, borderRadius: 11, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Icon name={files.length ? 'plus' : 'upload'} size={20} color="var(--accent)" strokeWidth={2} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{files.length ? 'Add another receipt' : 'Upload a receipt'}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 1 }}>PDF, JPG or PNG · up to 8 files</div>
+          </div>
+        </button>
+      </Overlay>
+    );
+  }
+
+  return (
+    <Overlay title="Reimbursements" onClose={closeOverlay}
+      footer={reimbursementEnabled ? <button onClick={() => setMode('new')} style={primaryBtn}>New claim</button> : undefined}>
+      {!reimbursementEnabled && (
+        <Card pad={16} style={{ marginBottom: 14, background: 'var(--warning-soft)' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--warning)' }}>Reimbursements not enabled</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 4 }}>Ask your HR admin to enable the reimbursement add-on to submit claims.</div>
+        </Card>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <span style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 700 }}>{reimbursements.length} claim{reimbursements.length === 1 ? '' : 's'}</span>
+        {reimbursements.length > 0 && (
+          <button onClick={downloadMine} disabled={downloading} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>
+            <Icon name="upload" size={15} color="var(--accent)" />{downloading ? 'Preparing…' : 'Download my records'}
+          </button>
+        )}
+      </div>
+      {reimbursements.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-3)' }}>
+          <Icon name="receipt" size={34} color="var(--text-3)" />
+          <div style={{ marginTop: 12, fontSize: 14.5, fontWeight: 700, color: 'var(--text-2)' }}>No claims yet</div>
+          <div style={{ fontSize: 12.5, marginTop: 4 }}>Submit an expense and track its approval here.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {reimbursements.map((r) => (
+            <Card key={r.id} pad={14}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 11, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icon name="receipt" size={19} color="var(--accent)" /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)' }}>{fmtINR(Number(r.amount))}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{r.category} · {new Date(r.spent_on + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+                </div>
+                <Pill tone={reimbTone(r.status)}>{r.status}</Pill>
+              </div>
+              {r.reason && <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 8, lineHeight: 1.4 }}>{r.reason}</div>}
+              {r.status === 'Pending' && <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 6 }}>{r.stage === 'manager' ? 'Awaiting manager approval' : 'Awaiting HR approval'}</div>}
+              {r.status === 'Paid' && <div style={{ fontSize: 11.5, color: 'var(--success)', fontWeight: 600, marginTop: 6 }}>Paid{r.paid_ref ? ` · ref ${r.paid_ref}` : ''}</div>}
+              {r.attachments.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}><Icon name="paperclip" size={13} color="var(--text-3)" />{r.attachments.length} receipt{r.attachments.length === 1 ? '' : 's'}</div>}
+            </Card>
+          ))}
+        </div>
+      )}
+      {reimbursements.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 14, padding: '0 4px', color: 'var(--text-3)' }}>
+          <Icon name="shield" size={14} color="var(--text-3)" />
+          <span style={{ fontSize: 11.5, lineHeight: 1.4 }}>Records are kept ~2 years. Download and keep an offline copy.</span>
         </div>
       )}
     </Overlay>

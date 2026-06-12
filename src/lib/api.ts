@@ -155,7 +155,7 @@ export async function listLeaveTypes(): Promise<LeaveType[]> {
 }
 
 // ── Organization + onboarding writes ──────────────────────────────────
-export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string };
+export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean };
 
 export async function getOrganization(orgId: string): Promise<OrgRow | null> {
   const { data, error } = await db().from('organizations').select('*').eq('id', orgId).single();
@@ -654,5 +654,114 @@ export async function markAllNotificationsRead(): Promise<void> {
 
 export async function markNotificationRead(id: string): Promise<void> {
   const { error } = await db().from('notifications').update({ read: true }).eq('id', id);
+  if (error) throw error;
+}
+
+// ── Reimbursements ────────────────────────────────────────────────────
+export type ReimbursementFile = { path: string; name: string; size: number };
+export type Reimbursement = {
+  id: string; org_id: string; employee_id: string | null; profile_id: string | null;
+  emp: string | null; code: string | null; dept: string | null;
+  category: string; amount: number; spent_on: string; reason: string | null;
+  attachments: ReimbursementFile[]; status: 'Pending' | 'Approved' | 'Rejected' | 'Paid';
+  stage: string; paid_at: string | null; paid_ref: string | null; created_at: string;
+};
+
+const RECEIPTS_BUCKET = 'receipts';
+
+async function currentUid(): Promise<string | null> {
+  const { data } = await db().auth.getSession();
+  return data.session?.user.id ?? null;
+}
+
+const safeName = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
+
+export function signedReceiptUrl(path: string, expiresIn = 3600): Promise<string | null> {
+  return db().storage.from(RECEIPTS_BUCKET).createSignedUrl(path, expiresIn)
+    .then(({ data }) => data?.signedUrl ?? null);
+}
+
+export async function uploadReceipts(orgId: string, files: File[]): Promise<ReimbursementFile[]> {
+  if (!files.length) return [];
+  const uid = (await currentUid()) ?? 'anon';
+  const out: ReimbursementFile[] = [];
+  for (const file of files) {
+    const path = `${orgId}/${uid}/${Date.now()}-${safeName(file.name)}`;
+    const { error } = await db().storage.from(RECEIPTS_BUCKET).upload(path, file, { upsert: false, contentType: file.type || undefined });
+    if (error) throw error;
+    out.push({ path, name: file.name, size: file.size });
+  }
+  return out;
+}
+
+export async function listReimbursements(): Promise<Reimbursement[]> {
+  const { data, error } = await db().from('reimbursements').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as Reimbursement[];
+}
+
+export async function myReimbursements(): Promise<Reimbursement[]> {
+  const uid = await currentUid();
+  if (!uid) return [];
+  const { data, error } = await db().from('reimbursements').select('*')
+    .eq('profile_id', uid).order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as Reimbursement[];
+}
+
+export async function applyReimbursement(orgId: string, p: {
+  employee: Employee | null;
+  empName: string;
+  category: string;
+  amount: number;
+  spentOn: string;
+  reason: string;
+  files: File[];
+  requireManager: boolean;
+}): Promise<void> {
+  const attachments = await uploadReceipts(orgId, p.files);
+  const stage = p.requireManager && p.employee?.manager ? 'manager' : 'hr';
+  const { error } = await db().from('reimbursements').insert({
+    org_id: orgId,
+    employee_id: p.employee?.id ?? null,
+    emp: p.employee?.name || p.empName,
+    code: p.employee?.code ?? null,
+    dept: p.employee?.dept ?? null,
+    category: p.category,
+    amount: p.amount,
+    spent_on: p.spentOn,
+    reason: p.reason || null,
+    attachments,
+    status: 'Pending',
+    stage,
+  });
+  if (error) throw error;
+}
+
+export async function decideReimbursement(row: Reimbursement, action: 'approve' | 'reject'): Promise<void> {
+  const uid = await currentUid();
+  let patch: Record<string, unknown>;
+  if (action === 'reject') {
+    patch = { status: 'Rejected', stage: 'reject', hr_decided_by: uid };
+  } else if (row.stage === 'manager') {
+    patch = { stage: 'hr', manager_decided_by: uid };
+  } else {
+    patch = { status: 'Approved', stage: 'done', hr_decided_by: uid };
+  }
+  const { error } = await db().from('reimbursements').update(patch).eq('id', row.id);
+  if (error) throw error;
+}
+
+export async function bulkDecideReimbursements(rows: Reimbursement[], action: 'approve' | 'reject'): Promise<void> {
+  for (const row of rows) await decideReimbursement(row, action);
+}
+
+export async function markReimbursementsPaid(rows: Reimbursement[], ref?: string): Promise<void> {
+  const uid = await currentUid();
+  const ids = rows.map((r) => r.id);
+  if (!ids.length) return;
+  const { error } = await db().from('reimbursements')
+    .update({ status: 'Paid', stage: 'done', paid_at: new Date().toISOString(), paid_by: uid, paid_ref: ref || null })
+    .in('id', ids);
   if (error) throw error;
 }

@@ -93,6 +93,33 @@ payment is verified server-side (`verify-payment`) and the org is activated for
 closes mid-payment. The server always recomputes the price from the tier table —
 clients can't tamper with amounts.
 
+## 7. Reimbursement add-on (optional)
+A paid add-on that lets employees submit expense/convenience claims with receipt
+attachments, routes them (optionally via the employee's manager) to HR for
+approval and payout, and lets HR bulk-approve, mark paid, and download a ZIP of
+receipts + an Excel report. Priced at **₹5 / employee / month**, billed annually
+and prorated into the org's existing 1-year period — every org (even the free
+≤5-seat tier) pays it to switch the feature on.
+
+1. **Run migration** `supabase/migrations/0006_reimbursements.sql` in the SQL
+   Editor. It adds the `reimbursements` table + RLS, a private **`receipts`**
+   Storage bucket (org-scoped), the notification triggers, the realtime entry,
+   and two org columns (`reimbursement_enabled`, `reimbursement_require_manager`).
+2. **Redeploy the billing functions** — they now price and apply the add-on:
+   ```bash
+   supabase functions deploy create-order
+   supabase functions deploy verify-payment
+   supabase functions deploy razorpay-webhook --no-verify-jwt
+   ```
+   (No new secrets — it reuses the Razorpay keys from §6.)
+3. In **Billing → Reimbursement add-on**, an owner/HR admin clicks **Enable** and
+   pays. Then toggle **Require manager approval** to choose the routing
+   (Employee → Manager → HR, or straight to HR).
+
+Once on, employees see a **Reimbursements** card on their home screen; HR/managers
+get a **Reimbursements** tab in the admin console. Records and receipts are kept
+~2 years — both HR and employees can **download an offline ZIP** anytime.
+
 ## Security notes
 - The **anon key is public** and safe in the browser — security comes from RLS.
 - Never put the **service_role** key in the frontend; it bypasses RLS. It's only

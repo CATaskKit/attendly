@@ -13,6 +13,8 @@ const cors = {
 // Keep in sync with src/lib/billing.ts TIERS.
 const rate = (seats: number) => (seats <= 5 ? 0 : seats <= 10 ? 25 : seats <= 50 ? 20 : seats <= 100 ? 18 : 15);
 const annual = (seats: number) => rate(seats) * seats * 12;
+const REIMBURSEMENT_RATE = 5; // ₹/employee/month add-on; keep in sync with billing.ts
+const addonAnnual = (seats: number) => REIMBURSEMENT_RATE * seats * 12;
 const YEAR_MS = 365 * 86400000;
 
 Deno.serve(async (req) => {
@@ -20,7 +22,7 @@ Deno.serve(async (req) => {
   const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
   try {
-    const { seats: requested = 0 } = await req.json().catch(() => ({}));
+    const { seats: requested = 0, reimbursement = false } = await req.json().catch(() => ({}));
     const url = Deno.env.get('SUPABASE_URL')!;
     const anon = Deno.env.get('SUPABASE_ANON_KEY')!;
     const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -39,21 +41,27 @@ Deno.serve(async (req) => {
     const admin = createClient(url, service);
     const { count } = await admin.from('employees').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id);
     const seats = Math.max(Math.floor(Number(requested)) || 0, count ?? 0);
-    if (seats <= 5) return json({ error: 'Up to 5 employees are free — no payment needed' }, 400);
 
     // Price against the org's open 1-year period: inside it we charge only the
-    // additional cost (new total − already-paid total) prorated for the days
-    // left, keeping the same period end; once lapsed it's a fresh full year.
-    const { data: org } = await admin.from('organizations').select('subscription_status, seats, current_period_end').eq('id', profile.org_id).single();
+    // additional cost — the seat delta plus, if newly enabling the reimbursement
+    // add-on, ₹5×seats×12 — prorated for the days left, keeping the same period
+    // end; once lapsed it's a fresh full year. Add-on alone is fine for ≤5 seats.
+    const { data: org } = await admin.from('organizations').select('subscription_status, seats, current_period_end, reimbursement_enabled').eq('id', profile.org_id).single();
     const now = Date.now();
     const periodEndMs = org?.current_period_end ? new Date(org.current_period_end).getTime() : 0;
     const valid = periodEndMs > now;
     const renewal = !valid;
     const paidSeats = org?.subscription_status === 'active' && valid ? (org.seats ?? 0) : 0;
     const fraction = valid ? Math.min(1, Math.max(0, (periodEndMs - now) / YEAR_MS)) : 1;
-    const base = valid ? annual(seats) - annual(paidSeats) : annual(seats);
-    const amountInr = Math.max(0, Math.round(base * fraction));
-    if (amountInr <= 0) return json({ error: 'No additional charge needed for that seat count' }, 400);
+    const alreadyReimb = org?.reimbursement_enabled === true && valid;
+    const wantReimb = Boolean(reimbursement) || alreadyReimb;
+
+    const seatYr = valid ? annual(seats) - annual(paidSeats) : annual(seats);
+    const addonYr = valid ? (wantReimb && !alreadyReimb ? addonAnnual(seats) : 0) : (wantReimb ? addonAnnual(seats) : 0);
+    const amountInr = Math.max(0, Math.round((seatYr + addonYr) * fraction));
+    if (amountInr <= 0) {
+      return json({ error: seats <= 5 && !wantReimb ? 'Up to 5 employees are free — no payment needed' : 'No additional charge needed' }, 400);
+    }
     const amount = amountInr * 100; // paise
     const newPeriodEnd = (valid ? new Date(periodEndMs) : new Date(now + YEAR_MS)).toISOString();
 
@@ -64,7 +72,7 @@ Deno.serve(async (req) => {
         amount,
         currency: 'INR',
         receipt: `attendly_${Date.now()}`,
-        notes: { org_id: profile.org_id, seats: String(seats), period_end: newPeriodEnd },
+        notes: { org_id: profile.org_id, seats: String(seats), period_end: newPeriodEnd, reimbursement: String(wantReimb) },
       }),
     });
     const order = await res.json();

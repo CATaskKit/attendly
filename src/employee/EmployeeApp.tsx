@@ -4,9 +4,11 @@ import { useAuth } from '../lib/auth';
 import {
   applyLeave, checkIn, checkOut, decideTeamLeave, ensureMyEmployee, getTodayAttendance,
   listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
-  type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow,
+  applyReimbursement, myReimbursements,
+  type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow, type Reimbursement,
 } from '../lib/api';
 import { onTablesChange } from '../lib/realtime';
+import { fetchBilling, reimbursementActive } from '../lib/billing';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
@@ -15,7 +17,7 @@ import { collectAttendanceAudit, getDeviceInfo, type AttendanceAudit } from '../
 import { fetchNetworkTime, formatAppDate, APP_TIME_ZONE } from '../lib/networkTime';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
-import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen } from './overlays';
+import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen } from './overlays';
 import { INITIAL_LEAVE, INITIAL_TEAM, type Ctx, type LeaveRequest, type Status, type TeamRequest } from './data';
 
 const isoDate = (d: Date) => formatAppDate(d);
@@ -152,6 +154,8 @@ export default function EmployeeApp() {
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [teamRows, setTeamRows] = useState<LeaveRow[]>([]);
+  const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
+  const [reimbState, setReimbState] = useState<{ enabled: boolean; requireManager: boolean }>({ enabled: false, requireManager: true });
   const [attendanceAudit, setAttendanceAudit] = useState<AttendanceAudit>(() => ({ location: null, ip: null, device: getDeviceInfo() }));
 
   const [tab, setTab] = useState('home');
@@ -199,13 +203,15 @@ export default function EmployeeApp() {
     try {
       const emp = await ensureMyEmployee(profile);
       setEmployee(emp);
-      const [leaveRows, attRows, balances, holidayRows, today, approvals] = await Promise.all([
+      const [leaveRows, attRows, balances, holidayRows, today, approvals, reimbRows, billing] = await Promise.all([
         myLeave(profile, emp),
         listMyAttendance(orgId, emp),
         myLeaveBalances(orgId, emp),
         listHolidays(),
         getTodayAttendance(orgId, emp, currentDay),
         canApproveTeam ? listMyTeamLeave(profile, emp) : Promise.resolve([]),
+        myReimbursements().catch(() => [] as Reimbursement[]),
+        fetchBilling(orgId).catch(() => null),
       ]);
       setLeaveRequests(leaveRows.map(mapLeave));
       setAttendanceRows(attRows);
@@ -213,6 +219,8 @@ export default function EmployeeApp() {
       setHolidays(holidayRows);
       setTeamRows(approvals);
       setTeamRequests(approvals.map(mapTeamLeave));
+      setReimbursements(reimbRows);
+      setReimbState({ enabled: billing ? reimbursementActive(billing) : false, requireManager: billing?.reimbursement_require_manager ?? true });
       if (today) setAttendanceAudit({ location: today.location, ip: today.ip, device: today.device || getDeviceInfo() });
       applyTodayState(today);
     } catch (e) {
@@ -224,7 +232,7 @@ export default function EmployeeApp() {
   // Live updates: refresh when leave/attendance change for this tenant.
   useEffect(() => {
     if (!live) return;
-    return onTablesChange(['leave_requests', 'attendance'], () => { void reloadLive(); });
+    return onTablesChange(['leave_requests', 'attendance', 'reimbursements'], () => { void reloadLive(); });
   }, [live, reloadLive]);
 
   // Notifications (live).
@@ -250,6 +258,8 @@ export default function EmployeeApp() {
     setTeamRows([]);
     setLeaveRequests(INITIAL_LEAVE);
     setTeamRequests(INITIAL_TEAM);
+    setReimbursements([]);
+    setReimbState({ enabled: false, requireManager: true });
   }, [live]);
 
   const showToast = (text: string, icon = 'checkCircle') => {
@@ -360,6 +370,20 @@ export default function EmployeeApp() {
     role,
     goAdmin: () => navigate('/admin'),
     notifications, unreadCount, markAllRead, markOneRead,
+    reimbursements,
+    reimbursementEnabled: reimbState.enabled,
+    submitReimbursement: (d) => {
+      if (!d.amount || d.amount <= 0) { showToast('Enter a valid amount', 'x'); return; }
+      if (!live || !orgId) { showToast('Connect your workspace to submit claims', 'x'); return; }
+      setOverlay(null);
+      applyReimbursement(orgId, {
+        employee, empName, category: d.category, amount: d.amount, spentOn: d.spentOn,
+        reason: d.reason, files: d.files, requireManager: reimbState.requireManager,
+      })
+        .then(() => reloadLive())
+        .then(() => showToast('Reimbursement claim submitted', 'checkCircle'))
+        .catch((err) => { console.error(err); showToast(err instanceof Error ? err.message : 'Could not submit claim', 'x'); void reloadLive(); });
+    },
   };
 
   const vars = themeVars(t);
@@ -384,6 +408,7 @@ export default function EmployeeApp() {
         {overlay === 'checkin' && <CheckInScreen ctx={ctx} />}
         {overlay === 'checkout' && <CheckOutScreen ctx={ctx} />}
         {overlay === 'applyleave' && <ApplyLeaveScreen ctx={ctx} />}
+        {overlay === 'reimbursements' && <ReimbursementsScreen ctx={ctx} />}
         {overlay === 'notifications' && <NotificationsScreen ctx={ctx} />}
         {overlay === 'logout' && <LogoutConfirm onCancel={ctx.closeOverlay} onConfirm={ctx.logout} />}
 

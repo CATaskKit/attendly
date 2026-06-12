@@ -1,6 +1,8 @@
 // Demo data + shared context types for the employee app.
-import type { AttendanceRow, Employee, Holiday, LeaveBalance, Notification } from '../lib/api';
+import type { AttendanceRow, Employee, Holiday, LeaveBalance, Notification, Reimbursement } from '../lib/api';
 import type { AttendanceAudit } from '../lib/attendanceAudit';
+
+export type ReimbursementDraft = { category: string; amount: number; spentOn: string; reason: string; files: File[] };
 
 export type LeaveRequest = {
   type: string;
@@ -81,4 +83,7 @@ export type Ctx = {
   unreadCount: number;
   markAllRead: () => void;
   markOneRead: (id: string) => void;
+  reimbursements: Reimbursement[];
+  reimbursementEnabled: boolean;
+  submitReimbursement: (draft: ReimbursementDraft) => void;
 };
