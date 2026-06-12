@@ -14,6 +14,8 @@ import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
 import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, type OrgBilling, type PaymentRow } from '../lib/billing';
+import Settings from './Settings';
+import { AttendanceMIS, PayrollMIS } from './mis';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -21,13 +23,16 @@ const fmtRange = (a: string | null, b: string | null) => {
   return a === b ? f(a) : `${f(a)} – ${f(b)}`;
 };
 
-type Page = 'dashboard' | 'approvals' | 'employees' | 'holidays' | 'reports' | 'billing';
+type Page = 'dashboard' | 'approvals' | 'employees' | 'attendance' | 'holidays' | 'payroll' | 'reports' | 'settings' | 'billing';
 const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'dashboard', icon: 'grid', label: 'Dashboard' },
   { id: 'approvals', icon: 'inbox', label: 'Leave Approvals' },
   { id: 'employees', icon: 'users', label: 'Employees' },
+  { id: 'attendance', icon: 'clock', label: 'Attendance MIS' },
   { id: 'holidays', icon: 'calendar', label: 'Holidays' },
+  { id: 'payroll', icon: 'briefcase', label: 'Payroll' },
   { id: 'reports', icon: 'download', label: 'Reports & export' },
+  { id: 'settings', icon: 'settings', label: 'Settings' },
   { id: 'billing', icon: 'wallet', label: 'Billing' },
 ];
 
@@ -180,6 +185,12 @@ export default function AdminApp() {
               <Billing billing={billing} seatsUsed={employees.length} canManage={canManage} onToast={fire} onRefresh={() => { void reload(); }} />
             ) : page === 'reports' ? (
               <Reports orgId={orgId} onToast={fire} />
+            ) : page === 'settings' ? (
+              <Settings orgId={orgId} canManage={canManage} onToast={fire} onGoBilling={() => setPage('billing')} />
+            ) : page === 'attendance' ? (
+              <AttendanceMIS orgId={orgId} employees={employees} leave={leave} />
+            ) : page === 'payroll' ? (
+              <PayrollMIS orgId={orgId} employees={employees} leave={leave} canManage={canManage} onToast={fire} />
             ) : !canManage && employees.length === 0 ? <EmptyManager />
             : employees.length === 0 && leave.length === 0 ? (
               <EmptyState seeding={seeding} canSeed={canManage} onSeed={onSeed} />
