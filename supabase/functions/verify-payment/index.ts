@@ -52,7 +52,9 @@ Deno.serve(async (req) => {
     }
 
     const seats = parseInt(order?.notes?.seats ?? '0', 10) || null;
-    const periodEnd = new Date(Date.now() + 365 * 86400000).toISOString();
+    // create-order decided the period end (kept for an upgrade, extended a year
+    // for a renewal); fall back to a fresh year if an older order lacks it.
+    const periodEnd = order?.notes?.period_end ?? new Date(Date.now() + 365 * 86400000).toISOString();
 
     const admin = createClient(url, service);
     await admin.from('billing_payments').upsert({

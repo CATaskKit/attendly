@@ -13,7 +13,7 @@ import {
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
-import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, trialDaysLeft, atSeatLimit, isActive, rateFor, annualTotal, fmtINR, TIERS, type OrgBilling, type PaymentRow } from '../lib/billing';
+import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, type OrgBilling, type PaymentRow } from '../lib/billing';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -596,29 +596,30 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
   const [payments, setPayments] = useState<PaymentRow[]>([]);
 
   useEffect(() => {
-    if (billing) setSeats((s) => s || Math.max(6, seatsUsed, billing.seats ?? 0));
+    if (billing) setSeats((s) => s || Math.max(FREE_SEAT_LIMIT + 1, seatsUsed, billing.seats ?? 0));
   }, [billing, seatsUsed]);
   useEffect(() => {
     if (billing?.id) listPayments(billing.id).then(setPayments).catch(() => {});
   }, [billing?.id]);
 
   if (!billing) return <Spinner label="Loading billing…" />;
-  const active = isActive(billing);
+  const paid = isPaid(billing);
   const plan = planFor(billing);
   const limit = seatLimit(billing);
   const limitText = limit === Infinity ? 'Unlimited' : String(limit);
-  const daysLeft = trialDaysLeft(billing);
+  const daysLeft = periodDaysLeft(billing);
   const over = atSeatLimit(billing, seatsUsed);
-  const minSeats = Math.max(6, seatsUsed);
+  const minSeats = Math.max(FREE_SEAT_LIMIT + 1, seatsUsed);
   const qty = Math.max(minSeats, Math.floor(seats) || 0);
-  const total = annualTotal(qty);
-  const statusText = active ? 'active' : billing.subscription_status === 'active' ? 'expired' : billing.subscription_status;
+  const quote = quoteFor(billing, qty);
+  const periodEndText = billing.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—';
+  const statusText = paid ? 'active' : billing.subscription_status === 'active' ? 'expired' : 'free';
 
   const pay = async () => {
     setBusy(true);
     try {
       await startCheckout(qty);
-      onToast(`Payment received — ${qty} seats active for 1 year`, 'green', 'checkCircle');
+      onToast(quote.renewal ? `Payment received — ${qty} seats for 1 year` : `Payment received — seats raised to ${qty}`, 'green', 'checkCircle');
       onRefresh();
       listPayments(billing.id).then(setPayments).catch(() => {});
     } catch (e) {
@@ -629,7 +630,7 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
 
   return (
     <div>
-      <PageHead title="Billing" sub="Your plan, seats and payments — billed annually via Razorpay." />
+      <PageHead title="Billing" sub="Your plan, seats and payments — up to 5 employees free, billed annually above that via Razorpay." />
       <ACard style={{ background: 'linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 60%, var(--green)))', border: 'none', color: '#fff', position: 'relative', overflow: 'hidden', marginBottom: 16 }}>
         <div style={{ position: 'absolute', top: -40, right: -30, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
         <div style={{ position: 'relative' }}>
@@ -637,14 +638,13 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
             <span style={{ fontSize: 13, fontWeight: 700, opacity: 0.9 }}>Current plan</span>
             <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 999, padding: '2px 10px', fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>{statusText}</span>
           </div>
-          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-0.02em' }}>{plan.name}{active ? ' · Annual' : ''}</div>
+          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-0.02em' }}>{plan.name}{paid ? ' · Annual' : ''}</div>
           <div style={{ fontSize: 14, opacity: 0.9, marginTop: 4 }}>
-            {active ? `₹${rateFor(billing.seats ?? seatsUsed)} / employee / month · billed annually`
-              : daysLeft > 0 ? `Free for up to 5 employees · ${daysLeft} day${daysLeft === 1 ? '' : 's'} of trial left`
-              : 'Free for up to 5 employees'}
+            {paid ? `₹${rateFor(billing.seats ?? seatsUsed)} / employee / month · billed annually`
+              : `Free for up to ${FREE_SEAT_LIMIT} employees${daysLeft > 0 ? ` · renews free in ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : ''}`}
           </div>
           <div style={{ display: 'flex', gap: 28, marginTop: 20, flexWrap: 'wrap' }}>
-            {([['Seats used', `${seatsUsed} / ${limitText}`], ['Status', statusText], ['Valid till', billing.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—']] as const).map((s) => (
+            {([['Seats used', `${seatsUsed} / ${limitText}`], ['Status', statusText], [paid ? 'Renews' : 'Valid till', periodEndText]] as const).map((s) => (
               <div key={s[0]}><div style={{ fontSize: 12, opacity: 0.8 }}>{s[0]}</div><div style={{ fontSize: 17, fontWeight: 700, marginTop: 2, textTransform: s[0] === 'Status' ? 'capitalize' : 'none' }}>{s[1]}</div></div>
             ))}
           </div>
@@ -659,7 +659,7 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
         <div style={{ height: 10, borderRadius: 999, background: 'var(--soft)', overflow: 'hidden', marginBottom: 8 }}>
           <div style={{ width: `${limit === Infinity ? (seatsUsed ? 40 : 0) : Math.min(100, (seatsUsed / limit) * 100)}%`, height: '100%', background: over ? 'var(--amber)' : 'var(--accent)', borderRadius: 999 }} />
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600 }}>{seatsUsed} of {limitText} seats in use{!active ? ' · the free plan covers up to 5 employees' : ''}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600 }}>{seatsUsed} of {limitText} seats in use{!paid ? ` · the free plan covers up to ${FREE_SEAT_LIMIT} employees` : ''}</div>
       </ACard>
 
       <ACard style={{ marginBottom: 16 }}>
@@ -677,16 +677,21 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
 
       {canManage && (
         <ACard style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 12 }}>{active ? 'Renew or change seats' : 'Buy seats — 1 year'}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 12 }}>{quote.renewal ? 'Renew — 1 year' : paid ? 'Add seats' : 'Upgrade beyond the free plan'}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             <input type="number" min={minSeats} value={seats || qty} onChange={(e) => setSeats(Number(e.target.value))} style={seatInput} aria-label="Number of seats" />
             <div style={{ fontSize: 14, color: 'var(--ink-2)', fontWeight: 600 }}>
-              {qty} seats × ₹{rateFor(qty)} × 12 mo = <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(total)} / year</span>
+              {qty} seats →
+              {quote.prorated
+                ? <> <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(quote.amount)}</span> now <span style={{ color: 'var(--ink-3)' }}>(prorated to {quote.periodEnd.toLocaleDateString()})</span></>
+                : <> <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(quote.amount)}</span> {quote.renewal ? '/ year' : 'now'}</>}
             </div>
-            <button onClick={() => { void pay(); }} disabled={busy} style={{ ...payBtn, opacity: busy ? 0.7 : 1 }}>{busy ? 'Processing…' : `Pay ${fmtINR(total)}`}</button>
+            <button onClick={() => { void pay(); }} disabled={busy || quote.amount <= 0} style={{ ...payBtn, opacity: busy || quote.amount <= 0 ? 0.7 : 1 }}>{busy ? 'Processing…' : `Pay ${fmtINR(quote.amount)}`}</button>
           </div>
           <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 10 }}>
-            Minimum {minSeats} seats (your current roster). Each payment starts a fresh 1-year period at the new seat count. UPI, cards and netbanking accepted.
+            Minimum {minSeats} seats (your current roster). {quote.renewal
+              ? `Starts a fresh 1-year period at ${fmtINR(quote.annualAtRenewal)}/year.`
+              : `You pay only the additional cost for the days left in your period; it then renews at ${fmtINR(quote.annualAtRenewal)}/year.`} UPI, cards and netbanking accepted.
           </div>
         </ACard>
       )}

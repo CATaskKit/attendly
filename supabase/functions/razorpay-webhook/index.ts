@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     const { data: existing } = await admin.from('billing_payments').select('id').eq('payment_id', payment.id).maybeSingle();
     if (existing) return new Response(JSON.stringify({ received: true, duplicate: true }), { headers: { 'Content-Type': 'application/json' } });
 
-    const periodEnd = new Date(Date.now() + 365 * 86400000).toISOString();
+    const periodEnd = order?.notes?.period_end ?? new Date(Date.now() + 365 * 86400000).toISOString();
     await admin.from('billing_payments').insert({
       org_id: orgId,
       provider: 'razorpay',

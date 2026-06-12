@@ -12,6 +12,8 @@ const cors = {
 
 // Keep in sync with src/lib/billing.ts TIERS.
 const rate = (seats: number) => (seats <= 5 ? 0 : seats <= 10 ? 25 : seats <= 50 ? 20 : seats <= 100 ? 18 : 15);
+const annual = (seats: number) => rate(seats) * seats * 12;
+const YEAR_MS = 365 * 86400000;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -39,7 +41,21 @@ Deno.serve(async (req) => {
     const seats = Math.max(Math.floor(Number(requested)) || 0, count ?? 0);
     if (seats <= 5) return json({ error: 'Up to 5 employees are free — no payment needed' }, 400);
 
-    const amount = rate(seats) * seats * 12 * 100; // paise, billed annually
+    // Price against the org's open 1-year period: inside it we charge only the
+    // additional cost (new total − already-paid total) prorated for the days
+    // left, keeping the same period end; once lapsed it's a fresh full year.
+    const { data: org } = await admin.from('organizations').select('subscription_status, seats, current_period_end').eq('id', profile.org_id).single();
+    const now = Date.now();
+    const periodEndMs = org?.current_period_end ? new Date(org.current_period_end).getTime() : 0;
+    const valid = periodEndMs > now;
+    const renewal = !valid;
+    const paidSeats = org?.subscription_status === 'active' && valid ? (org.seats ?? 0) : 0;
+    const fraction = valid ? Math.min(1, Math.max(0, (periodEndMs - now) / YEAR_MS)) : 1;
+    const base = valid ? annual(seats) - annual(paidSeats) : annual(seats);
+    const amountInr = Math.max(0, Math.round(base * fraction));
+    if (amountInr <= 0) return json({ error: 'No additional charge needed for that seat count' }, 400);
+    const amount = amountInr * 100; // paise
+    const newPeriodEnd = (valid ? new Date(periodEndMs) : new Date(now + YEAR_MS)).toISOString();
 
     const res = await fetch('https://api.razorpay.com/v1/orders', {
       method: 'POST',
@@ -48,14 +64,14 @@ Deno.serve(async (req) => {
         amount,
         currency: 'INR',
         receipt: `attendly_${Date.now()}`,
-        notes: { org_id: profile.org_id, seats: String(seats) },
+        notes: { org_id: profile.org_id, seats: String(seats), period_end: newPeriodEnd },
       }),
     });
     const order = await res.json();
     if (!res.ok) return json({ error: order?.error?.description || 'Could not create the payment order' }, 400);
 
     await admin.from('organizations').update({ razorpay_order_id: order.id }).eq('id', profile.org_id);
-    return json({ orderId: order.id, keyId, amount, currency: 'INR', seats });
+    return json({ orderId: order.id, keyId, amount, currency: 'INR', seats, renewal });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'order failed' }, 400);
   }

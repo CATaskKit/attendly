@@ -12,8 +12,15 @@ export const TIERS = [
   { upTo: Infinity, rate: 15, label: '101+' },
 ] as const;
 
+// Every org gets a 1-year period from onboarding. Up to 5 employees is free for
+// that whole year (and renews free). Above 5, the org pays the tier matrix —
+// prorated to fit inside their existing period; a fresh year only at renewal.
+export const FREE_SEAT_LIMIT = 5;
+export const PERIOD_DAYS = 365;
+const YEAR_MS = PERIOD_DAYS * 86400000;
+
 export const PLANS = {
-  trial: { key: 'trial', name: 'Free Trial', seatLimit: 5 },
+  free: { key: 'free', name: 'Free (up to 5)', seatLimit: FREE_SEAT_LIMIT },
   growth: { key: 'growth', name: 'Growth', seatLimit: Infinity },
 } as const;
 
@@ -39,25 +46,63 @@ export type OrgBilling = {
   current_period_end: string | null;
 };
 
-/** Paid and not past the end of the annual period. */
+/** The org's 1-year period is still open (free or paid). */
+export function periodValid(b: Pick<OrgBilling, 'current_period_end'>): boolean {
+  return !!b.current_period_end && new Date(b.current_period_end).getTime() > Date.now();
+}
+/** Paying customer (>5 seats) with an open period. */
+export function isPaid(b: Pick<OrgBilling, 'subscription_status' | 'current_period_end'>): boolean {
+  return b.subscription_status === 'active' && periodValid(b);
+}
+/** Back-compat alias used around the app: "active" === has an open period. */
 export function isActive(b: Pick<OrgBilling, 'subscription_status' | 'current_period_end'>): boolean {
-  if (b.subscription_status !== 'active') return false;
-  return !b.current_period_end || new Date(b.current_period_end).getTime() > Date.now();
+  return isPaid(b);
 }
 export function planFor(b: Pick<OrgBilling, 'subscription_status' | 'current_period_end'>) {
-  return isActive(b) ? PLANS.growth : PLANS.trial;
+  return isPaid(b) ? PLANS.growth : PLANS.free;
 }
-/** Trial caps at 5; an active org is capped at the seats it paid for. */
+/** Seats the org has paid for and that are still inside the period. */
+export function currentPaidSeats(b: Pick<OrgBilling, 'subscription_status' | 'current_period_end' | 'seats'>): number {
+  return isPaid(b) ? (b.seats ?? 0) : 0;
+}
+/** Free orgs cap at 5; a paid org is capped at the seats it bought. */
 export function seatLimit(b: Pick<OrgBilling, 'subscription_status' | 'current_period_end' | 'seats'>): number {
-  return isActive(b) ? (b.seats ?? Infinity) : PLANS.trial.seatLimit;
+  return isPaid(b) ? (b.seats ?? Infinity) : FREE_SEAT_LIMIT;
 }
-export function trialDaysLeft(b: Pick<OrgBilling, 'trial_ends_at'>): number {
-  if (!b.trial_ends_at) return 0;
-  return Math.max(0, Math.ceil((new Date(b.trial_ends_at).getTime() - Date.now()) / 86400000));
+/** Whole days left in the current 1-year period. */
+export function periodDaysLeft(b: Pick<OrgBilling, 'current_period_end'>): number {
+  if (!b.current_period_end) return 0;
+  return Math.max(0, Math.ceil((new Date(b.current_period_end).getTime() - Date.now()) / 86400000));
+}
+/** Fraction (0–1) of a year still remaining — used to prorate upgrades. */
+export function periodFraction(b: Pick<OrgBilling, 'current_period_end'>): number {
+  if (!periodValid(b)) return 1;
+  const ms = new Date(b.current_period_end!).getTime() - Date.now();
+  return Math.min(1, Math.max(0, ms / YEAR_MS));
 }
 /** true when adding one more employee would exceed the current plan's seats. */
 export function atSeatLimit(b: Pick<OrgBilling, 'subscription_status' | 'current_period_end' | 'seats'>, seatsUsed: number): boolean {
   return seatsUsed >= seatLimit(b);
+}
+
+export type Quote = { amount: number; prorated: boolean; renewal: boolean; periodEnd: Date; annualAtRenewal: number };
+/**
+ * What it costs *right now* to run `newSeats` employees. Inside an open period
+ * we charge only the additional cost (new tier total − already-paid total),
+ * prorated for the days left, keeping the same period end. Once the period has
+ * lapsed it's a full fresh year. Mirror of the server in create-order.
+ */
+export function quoteFor(b: Pick<OrgBilling, 'subscription_status' | 'current_period_end' | 'seats'>, newSeats: number): Quote {
+  const valid = periodValid(b);
+  const frac = periodFraction(b);
+  const base = valid ? annualTotal(newSeats) - annualTotal(currentPaidSeats(b)) : annualTotal(newSeats);
+  return {
+    amount: Math.max(0, Math.round(base * frac)),
+    prorated: valid && frac < 1,
+    renewal: !valid,
+    periodEnd: valid ? new Date(b.current_period_end!) : new Date(Date.now() + YEAR_MS),
+    annualAtRenewal: annualTotal(newSeats),
+  };
 }
 
 function db() {
@@ -67,8 +112,9 @@ function db() {
 
 export async function fetchBilling(orgId: string): Promise<OrgBilling | null> {
   if (!isSupabaseConfigured) {
-    // Demo mode: a healthy trial org so the Billing tab still renders.
-    return { id: orgId, name: 'Demo workspace', plan: 'trial', subscription_status: 'trialing', seats: null, trial_ends_at: new Date(Date.now() + 14 * 86400000).toISOString(), current_period_end: null };
+    // Demo mode: a free org with a fresh 1-year period so Billing renders.
+    const periodEnd = new Date(Date.now() + YEAR_MS).toISOString();
+    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd };
   }
   const { data, error } = await db().from('organizations')
     .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end')
@@ -134,12 +180,13 @@ function loadRazorpay(): Promise<void> {
 }
 
 /**
- * Buy `seats` seats for one year: the server prices the order (tier table),
- * Razorpay Checkout opens in-app (UPI/cards/netbanking), and on success the
- * payment is verified server-side which activates the org.
+ * Buy/raise the seat cap to `seats`: the server prices the order (tier matrix,
+ * prorated to the open period), Razorpay Checkout opens in-app (UPI/cards/
+ * netbanking), and on success the payment is verified server-side which raises
+ * the org's seat cap (and, on renewal, extends the period by a year).
  */
 export async function startCheckout(seats: number): Promise<void> {
-  const order = await invokeFn<{ orderId: string; keyId: string; amount: number; currency: string; seats: number }>('create-order', { seats });
+  const order = await invokeFn<{ orderId: string; keyId: string; amount: number; currency: string; seats: number; renewal: boolean }>('create-order', { seats });
   await loadRazorpay();
   await new Promise<void>((resolve, reject) => {
     const rzp = new window.Razorpay!({
@@ -148,7 +195,7 @@ export async function startCheckout(seats: number): Promise<void> {
       amount: order.amount,
       currency: order.currency,
       name: APP_NAME,
-      description: `${order.seats} seats · 1 year`,
+      description: order.renewal ? `${order.seats} seats · 1 year` : `${order.seats} seats · prorated to period end`,
       theme: { color: '#4f46e5' },
       modal: { ondismiss: () => reject(new Error('Payment canceled')) },
       handler: (resp: RzpHandlerResponse) => {

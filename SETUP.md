@@ -49,15 +49,19 @@ redeploy.
 - Realtime updates for attendance/approvals, an in-app notification center, server-side `.xlsx` exports via an Edge Function, and Stripe per-seat billing with plan/seat gating.
 
 ## 6. Billing (Razorpay, annual per-seat) — optional, for going live
-Pricing (per employee / month, **billed annually**): 1–5 **free** · 6–10 **₹25**
-· 11–50 **₹20** · 51–100 **₹18** · 101+ **₹15**. Until you complete this, every
-org stays on the free plan (up to 5 employees) and the Billing tab shows a
-"connect Razorpay" hint instead of failing.
+**Every org gets a 1-year period the moment it onboards.** Up to **5 employees is
+free** for that whole year and renews free. Above 5 it's paid (per employee /
+month, **billed annually**): 6–10 **₹25** · 11–50 **₹20** · 51–100 **₹18** ·
+101+ **₹15**. Raising the seat cap mid-year charges **only the additional cost,
+prorated** for the days left in the period (the period end stays put); a fresh
+year is charged only at renewal. Until you complete this, every org stays on the
+free 5-seat plan and the Billing tab shows a "connect Razorpay" hint.
 
 1. **Run the billing migrations**: in SQL Editor run
-   `supabase/migrations/0003_billing.sql` then `0004_razorpay.sql`.
-   They add the subscription/payment-history tables and lock the billing columns
-   so only the Edge Functions (service_role) can change them — admins can't
+   `supabase/migrations/0003_billing.sql`, then `0004_razorpay.sql`, then
+   `0005_billing_period.sql`. They add the subscription/payment-history tables,
+   give every org a 1-year period at onboarding, and lock the billing columns so
+   only the Edge Functions (service_role) can change them — admins can't
    self-upgrade by editing the database.
 2. **Get your Razorpay keys** (Dashboard → Account & Settings → API Keys →
    Generate key). Start with **Test mode** keys (`rzp_test_...`) and switch to
