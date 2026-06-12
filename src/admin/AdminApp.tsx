@@ -13,7 +13,7 @@ import {
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
-import { fetchBilling, startCheckout, openBillingPortal, planFor, seatLimit, trialDaysLeft, atSeatLimit, isActive, PRICE_PER_SEAT_LABEL, type OrgBilling } from '../lib/billing';
+import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, trialDaysLeft, atSeatLimit, isActive, rateFor, annualTotal, fmtINR, TIERS, type OrgBilling, type PaymentRow } from '../lib/billing';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -68,22 +68,6 @@ export default function AdminApp() {
 
   // Live updates: refresh whenever leave/attendance/employees change anywhere.
   useEffect(() => onTablesChange(['leave_requests', 'attendance', 'employees'], () => { void reload(); }), [reload]);
-
-  // Returning from Stripe Checkout (#/admin?billing=success|cancel): toast, land
-  // on Billing, refetch (the webhook updates the org row a beat later), clean URL.
-  useEffect(() => {
-    const m = window.location.hash.match(/[?&]billing=(success|cancel)/);
-    if (!m) return;
-    setPage('billing');
-    if (m[1] === 'success') {
-      fire('Subscription active — welcome to Growth!', 'green', 'checkCircle');
-      const t = setTimeout(() => { void reload(); }, 3500);
-      window.history.replaceState(null, '', window.location.href.replace(/[?&]billing=(success|cancel)/, ''));
-      return () => clearTimeout(t);
-    }
-    fire('Checkout canceled — no changes made', 'amber', 'wallet');
-    window.history.replaceState(null, '', window.location.href.replace(/[?&]billing=(success|cancel)/, ''));
-  }, [reload]);
 
   const onSeed = async () => {
     if (!orgId) return;
@@ -193,7 +177,7 @@ export default function AdminApp() {
         <main style={{ flex: 1, overflowY: 'auto', padding: 28 }}>
           {loading ? <Spinner label="Loading your workspace…" />
             : page === 'billing' ? (
-              <Billing billing={billing} seatsUsed={employees.length} canManage={canManage} onToast={fire} />
+              <Billing billing={billing} seatsUsed={employees.length} canManage={canManage} onToast={fire} onRefresh={() => { void reload(); }} />
             ) : page === 'reports' ? (
               <Reports orgId={orgId} onToast={fire} />
             ) : !canManage && employees.length === 0 ? <EmptyManager />
@@ -602,52 +586,72 @@ function NotificationBell() {
   );
 }
 
-// ── Billing (subscription) ────────────────────────────────────────────
-const whiteBtn: CSSProperties = { height: 40, padding: '0 18px', borderRadius: 11, border: 'none', background: '#fff', color: 'var(--accent-deep)', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
+// ── Billing (Razorpay · annual per-seat tiers) ────────────────────────
+const payBtn: CSSProperties = { height: 42, padding: '0 22px', borderRadius: 11, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
+const seatInput: CSSProperties = { width: 110, height: 42, borderRadius: 11, border: '1px solid var(--line)', padding: '0 12px', fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', background: '#fff', outline: 'none' };
 
-function Billing({ billing, seatsUsed, canManage, onToast }: { billing: OrgBilling | null; seatsUsed: number; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void }) {
+function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billing: OrgBilling | null; seatsUsed: number; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void; onRefresh: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [seats, setSeats] = useState(0);
+  const [payments, setPayments] = useState<PaymentRow[]>([]);
+
+  useEffect(() => {
+    if (billing) setSeats((s) => s || Math.max(6, seatsUsed, billing.seats ?? 0));
+  }, [billing, seatsUsed]);
+  useEffect(() => {
+    if (billing?.id) listPayments(billing.id).then(setPayments).catch(() => {});
+  }, [billing?.id]);
+
   if (!billing) return <Spinner label="Loading billing…" />;
-  const plan = planFor(billing);
   const active = isActive(billing);
+  const plan = planFor(billing);
   const limit = seatLimit(billing);
   const limitText = limit === Infinity ? 'Unlimited' : String(limit);
   const daysLeft = trialDaysLeft(billing);
   const over = atSeatLimit(billing, seatsUsed);
+  const minSeats = Math.max(6, seatsUsed);
+  const qty = Math.max(minSeats, Math.floor(seats) || 0);
+  const total = annualTotal(qty);
+  const statusText = active ? 'active' : billing.subscription_status === 'active' ? 'expired' : billing.subscription_status;
 
-  const go = async (fn: () => Promise<void>, fail: string) => {
+  const pay = async () => {
     setBusy(true);
-    try { await fn(); } catch (e) { onToast(e instanceof Error ? e.message : fail, 'red', 'xCircle'); setBusy(false); }
+    try {
+      await startCheckout(qty);
+      onToast(`Payment received — ${qty} seats active for 1 year`, 'green', 'checkCircle');
+      onRefresh();
+      listPayments(billing.id).then(setPayments).catch(() => {});
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Payment failed';
+      onToast(msg, msg.toLowerCase().includes('cancel') ? 'amber' : 'red', msg.toLowerCase().includes('cancel') ? 'wallet' : 'xCircle');
+    } finally { setBusy(false); }
   };
 
   return (
     <div>
-      <PageHead title="Billing" sub="Your subscription, seats and invoices." />
+      <PageHead title="Billing" sub="Your plan, seats and payments — billed annually via Razorpay." />
       <ACard style={{ background: 'linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 60%, var(--green)))', border: 'none', color: '#fff', position: 'relative', overflow: 'hidden', marginBottom: 16 }}>
         <div style={{ position: 'absolute', top: -40, right: -30, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
         <div style={{ position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 700, opacity: 0.9 }}>Current plan</span>
-            <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 999, padding: '2px 10px', fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>{billing.subscription_status}</span>
+            <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 999, padding: '2px 10px', fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>{statusText}</span>
           </div>
-          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-0.02em' }}>{plan.name}</div>
-          <div style={{ fontSize: 14, opacity: 0.9, marginTop: 4 }}>{active ? PRICE_PER_SEAT_LABEL : daysLeft > 0 ? `Free trial · ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : 'Free trial'}</div>
+          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-0.02em' }}>{plan.name}{active ? ' · Annual' : ''}</div>
+          <div style={{ fontSize: 14, opacity: 0.9, marginTop: 4 }}>
+            {active ? `₹${rateFor(billing.seats ?? seatsUsed)} / employee / month · billed annually`
+              : daysLeft > 0 ? `Free for up to 5 employees · ${daysLeft} day${daysLeft === 1 ? '' : 's'} of trial left`
+              : 'Free for up to 5 employees'}
+          </div>
           <div style={{ display: 'flex', gap: 28, marginTop: 20, flexWrap: 'wrap' }}>
-            {([['Seats used', `${seatsUsed} / ${limitText}`], ['Status', billing.subscription_status], ['Renews', billing.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—']] as const).map((s) => (
+            {([['Seats used', `${seatsUsed} / ${limitText}`], ['Status', statusText], ['Valid till', billing.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—']] as const).map((s) => (
               <div key={s[0]}><div style={{ fontSize: 12, opacity: 0.8 }}>{s[0]}</div><div style={{ fontSize: 17, fontWeight: 700, marginTop: 2, textTransform: s[0] === 'Status' ? 'capitalize' : 'none' }}>{s[1]}</div></div>
             ))}
           </div>
-          {canManage && (
-            <div style={{ display: 'flex', gap: 12, marginTop: 22 }}>
-              {!active
-                ? <button onClick={() => go(() => startCheckout(Math.max(seatsUsed, 1)), 'Billing is not configured yet')} disabled={busy} style={whiteBtn}>{busy ? 'Opening…' : 'Upgrade to Growth'}</button>
-                : <button onClick={() => go(() => openBillingPortal(), 'Billing is not configured yet')} disabled={busy} style={whiteBtn}>{busy ? 'Opening…' : 'Manage subscription'}</button>}
-            </div>
-          )}
         </div>
       </ACard>
 
-      <ACard>
+      <ACard style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Seat usage</div>
           {over && <APill tone="amber">Seat limit reached</APill>}
@@ -655,12 +659,55 @@ function Billing({ billing, seatsUsed, canManage, onToast }: { billing: OrgBilli
         <div style={{ height: 10, borderRadius: 999, background: 'var(--soft)', overflow: 'hidden', marginBottom: 8 }}>
           <div style={{ width: `${limit === Infinity ? (seatsUsed ? 40 : 0) : Math.min(100, (seatsUsed / limit) * 100)}%`, height: '100%', background: over ? 'var(--amber)' : 'var(--accent)', borderRadius: 999 }} />
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600 }}>{seatsUsed} of {limitText} seats in use{!active ? ` · Trial allows up to ${limitText}` : ''}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600 }}>{seatsUsed} of {limitText} seats in use{!active ? ' · the free plan covers up to 5 employees' : ''}</div>
       </ACard>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, color: 'var(--ink-3)' }}>
+      <ACard style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 10 }}>Pricing — per employee / month, billed annually</div>
+        {TIERS.map((t) => {
+          const current = qty <= t.upTo && (TIERS[TIERS.indexOf(t) - 1]?.upTo ?? 0) < qty;
+          return (
+            <div key={t.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', borderRadius: 9, background: current ? 'var(--soft)' : 'transparent', fontWeight: current ? 700 : 500, fontSize: 13.5, color: current ? 'var(--ink-1)' : 'var(--ink-2)' }}>
+              <span>{t.label} employees</span>
+              <span>{t.rate === 0 ? 'Free' : `₹${t.rate} / emp / mo`}</span>
+            </div>
+          );
+        })}
+      </ACard>
+
+      {canManage && (
+        <ACard style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 12 }}>{active ? 'Renew or change seats' : 'Buy seats — 1 year'}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <input type="number" min={minSeats} value={seats || qty} onChange={(e) => setSeats(Number(e.target.value))} style={seatInput} aria-label="Number of seats" />
+            <div style={{ fontSize: 14, color: 'var(--ink-2)', fontWeight: 600 }}>
+              {qty} seats × ₹{rateFor(qty)} × 12 mo = <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(total)} / year</span>
+            </div>
+            <button onClick={() => { void pay(); }} disabled={busy} style={{ ...payBtn, opacity: busy ? 0.7 : 1 }}>{busy ? 'Processing…' : `Pay ${fmtINR(total)}`}</button>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 10 }}>
+            Minimum {minSeats} seats (your current roster). Each payment starts a fresh 1-year period at the new seat count. UPI, cards and netbanking accepted.
+          </div>
+        </ACard>
+      )}
+
+      {payments.length > 0 && (
+        <ACard style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 8 }}>Payment history</div>
+          {payments.map((p) => (
+            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 4px', borderTop: '1px solid var(--line)', fontSize: 13, color: 'var(--ink-2)', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 600 }}>{new Date(p.created_at).toLocaleDateString()}</span>
+              <span>{p.seats} seats</span>
+              <span style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{fmtINR(p.amount_inr)}</span>
+              <span style={{ color: 'var(--ink-3)' }}>valid till {new Date(p.period_end).toLocaleDateString()}</span>
+            </div>
+          ))}
+        </ACard>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, color: 'var(--ink-3)' }}>
         <AIcon name="shield" size={15} color="var(--ink-3)" />
-        <span style={{ fontSize: 12 }}>Billing is processed by Stripe. Connect Stripe (see SETUP.md) to enable upgrades.</span>
+        <span style={{ fontSize: 12 }}>Payments are processed securely by Razorpay. Connect your Razorpay keys (SETUP.md §6) to enable purchases.</span>
       </div>
     </div>
   );

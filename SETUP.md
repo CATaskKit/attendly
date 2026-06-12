@@ -48,40 +48,46 @@ redeploy.
 - Employee check-in/out, attendance history, leave requests, leave balances, profile details, holidays, and manager approvals are backed by Supabase.
 - Realtime updates for attendance/approvals, an in-app notification center, server-side `.xlsx` exports via an Edge Function, and Stripe per-seat billing with plan/seat gating.
 
-## 6. Billing (Stripe per-seat) — optional, for going live
-Until you complete this, the app stays on the free **Trial** plan (up to 5
-employees) and the Billing tab shows an "connect Stripe" hint instead of failing.
+## 6. Billing (Razorpay, annual per-seat) — optional, for going live
+Pricing (per employee / month, **billed annually**): 1–5 **free** · 6–10 **₹25**
+· 11–50 **₹20** · 51–100 **₹18** · 101+ **₹15**. Until you complete this, every
+org stays on the free plan (up to 5 employees) and the Billing tab shows a
+"connect Razorpay" hint instead of failing.
 
-1. **Run the billing migration**: in SQL Editor run `supabase/migrations/0003_billing.sql`.
-   It adds the subscription columns to `organizations` and locks them so only the
-   Stripe webhook (service_role) can change them — admins can't self-upgrade.
-2. **Create the product/price in Stripe** (Dashboard → Products):
-   - One product "Attendly", a **recurring** price billed **per unit** (per seat),
-     e.g. ₹49/month. Copy the **Price ID** (`price_...`).
+1. **Run the billing migrations**: in SQL Editor run
+   `supabase/migrations/0003_billing.sql` then `0004_razorpay.sql`.
+   They add the subscription/payment-history tables and lock the billing columns
+   so only the Edge Functions (service_role) can change them — admins can't
+   self-upgrade by editing the database.
+2. **Get your Razorpay keys** (Dashboard → Account & Settings → API Keys →
+   Generate key). Start with **Test mode** keys (`rzp_test_...`) and switch to
+   live keys when you're ready to charge real money.
 3. **Set the Edge Function secrets** (Project → Edge Functions → Secrets, or CLI):
    ```bash
-   supabase secrets set STRIPE_SECRET_KEY=sk_live_...        \
-                        STRIPE_PRICE_ID=price_...            \
-                        STRIPE_WEBHOOK_SECRET=whsec_...      \
-                        APP_URL=https://your-app-url
+   supabase secrets set RAZORPAY_KEY_ID=rzp_test_...      \
+                        RAZORPAY_KEY_SECRET=...           \
+                        RAZORPAY_WEBHOOK_SECRET=<pick-a-long-random-string>
    ```
    (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` are injected
-   automatically.) Set `STRIPE_WEBHOOK_SECRET` after step 5.
+   automatically. Unlike Stripe, *you choose* the webhook secret — use the same
+   string in step 5.)
 4. **Deploy the three functions:**
    ```bash
-   supabase functions deploy create-checkout
-   supabase functions deploy billing-portal
-   supabase functions deploy stripe-webhook --no-verify-jwt
+   supabase functions deploy create-order
+   supabase functions deploy verify-payment
+   supabase functions deploy razorpay-webhook --no-verify-jwt
    ```
-5. **Add the webhook** (Stripe → Developers → Webhooks → Add endpoint):
-   - URL: `https://<project-ref>.functions.supabase.co/stripe-webhook`
-   - Events: `checkout.session.completed`, `customer.subscription.updated`,
-     `customer.subscription.deleted`. Copy its **Signing secret** (`whsec_...`)
-     back into `STRIPE_WEBHOOK_SECRET` (step 3) and redeploy `stripe-webhook`.
+5. **Add the webhook** (Razorpay Dashboard → Account & Settings → Webhooks → Add):
+   - URL: `https://<project-ref>.functions.supabase.co/razorpay-webhook`
+   - Secret: the same `RAZORPAY_WEBHOOK_SECRET` from step 3
+   - Active events: **`order.paid`**
 
-Now an owner/HR admin can open **Billing → Upgrade to Growth**, pay per seat in
-Stripe Checkout, and the webhook flips the org to **active/unlimited seats**.
-**Manage subscription** opens the Stripe customer portal.
+Now an owner/HR admin opens **Billing**, picks a seat count, and pays via
+Razorpay Checkout (UPI / cards / netbanking) without leaving the app. The
+payment is verified server-side (`verify-payment`) and the org is activated for
+**1 year** at that seat count; the webhook is a backup sync in case the tab
+closes mid-payment. The server always recomputes the price from the tier table —
+clients can't tamper with amounts.
 
 ## Security notes
 - The **anon key is public** and safe in the browser — security comes from RLS.

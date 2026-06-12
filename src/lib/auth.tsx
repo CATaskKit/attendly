@@ -78,9 +78,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_e, s) => {
+    // Never await Supabase calls inside this callback: supabase-js emits auth
+    // events while holding its auth lock, and a query here needs that same lock
+    // to resolve the session — awaiting deadlocks every call that follows
+    // (e.g. create_organization right after signUp). Defer to the next tick.
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       setSession(s);
-      if (s) await loadProfile(s.user.id);
+      if (s) setTimeout(() => { void loadProfile(s.user.id); }, 0);
       else setProfile(null);
     });
     return () => { active = false; sub.subscription.unsubscribe(); };
