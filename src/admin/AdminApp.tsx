@@ -207,7 +207,7 @@ export default function AdminApp() {
             ) : page === 'holidays' ? (
               <Holidays holidays={shownHolidays} canManage={canManage} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
             ) : (
-              <Dashboard stats={stats} leave={shownLeave} onGo={setPage} onDecide={onDecide} />
+              <Dashboard stats={stats} leave={shownLeave} reimbursements={reimbursements} reimbEnabled={!!billing && reimbursementActive(billing)} onGo={setPage} onDecide={onDecide} />
             )}
         </main>
       </div>
@@ -243,8 +243,13 @@ function EmptyManager() {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────
-function Dashboard({ stats, leave, onGo, onDecide }: { stats: Stats | null; leave: LeaveRow[]; onGo: (p: Page) => void; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
+function Dashboard({ stats, leave, reimbursements, reimbEnabled, onGo, onDecide }: { stats: Stats | null; leave: LeaveRow[]; reimbursements: Reimbursement[]; reimbEnabled: boolean; onGo: (p: Page) => void; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
   const pending = leave.filter((l) => l.status === 'Pending');
+  const showReimb = reimbEnabled || reimbursements.length > 0;
+  const reimbPending = reimbursements.filter((r) => r.status === 'Pending');
+  const reimbApproved = reimbursements.filter((r) => r.status === 'Approved');
+  const awaitingPayout = reimbApproved.reduce((a, r) => a + Number(r.amount || 0), 0);
+  const paidTotal = reimbursements.filter((r) => r.status === 'Paid').reduce((a, r) => a + Number(r.amount || 0), 0);
   return (
     <div>
       <PageHead title="Dashboard" sub={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} />
@@ -255,6 +260,40 @@ function Dashboard({ stats, leave, onGo, onDecide }: { stats: Stats | null; leav
         <KPI icon="grid" label="Departments" value={stats?.departments ?? 0} tone="amber" />
         <KPI icon="inbox" label="Pending approvals" value={stats?.pendingLeave ?? 0} tone="amber" onClick={() => onGo('approvals')} />
       </div>
+
+      {showReimb && (
+        <div style={{ marginTop: 16 }}>
+          <ACard pad={0} style={{ overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <AIcon name="receipt" size={18} color="var(--accent)" />
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Reimbursements</div>
+              </div>
+              <button onClick={() => onGo('reimbursements')} style={{ border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}>Review <AIcon name="chevronRight" size={15} color="var(--accent)" /></button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1, background: 'var(--line)', borderTop: '1px solid var(--line)' }}>
+              {([
+                ['Pending approval', String(reimbPending.length), 'var(--amber)'],
+                ['Awaiting payout', fmtINR(awaitingPayout), 'var(--accent)'],
+                ['Claims to pay', String(reimbApproved.length), 'var(--ink-1)'],
+                ['Paid (total)', fmtINR(paidTotal), 'var(--green)'],
+              ] as const).map(([label, value, color]) => (
+                <div key={label} style={{ background: 'var(--panel)', padding: '16px 20px' }}>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>{label}</div>
+                  <div style={{ fontSize: 21, fontWeight: 800, color, marginTop: 4, letterSpacing: '-0.01em' }}>{value}</div>
+                </div>
+              ))}
+            </div>
+            {reimbApproved.length > 0 && (
+              <div style={{ padding: '12px 22px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AIcon name="wallet" size={15} color="var(--accent)" />
+                <span style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 600 }}>{reimbApproved.length} claim{reimbApproved.length === 1 ? '' : 's'} approved — download the ZIP report and process {fmtINR(awaitingPayout)}.</span>
+                <button onClick={() => onGo('reimbursements')} style={{ marginLeft: 'auto', border: 'none', background: 'var(--accent-soft)', color: 'var(--accent-deep)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: '6px 12px', borderRadius: 8 }}>Process payouts</button>
+              </div>
+            )}
+          </ACard>
+        </div>
+      )}
 
       <div style={{ marginTop: 16 }}>
         <ACard pad={0} style={{ overflow: 'hidden' }}>
@@ -610,11 +649,12 @@ const seatInput: CSSProperties = { width: 110, height: 42, borderRadius: 11, bor
 function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billing: OrgBilling | null; seatsUsed: number; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void; onRefresh: () => void }) {
   const [busy, setBusy] = useState(false);
   const [seats, setSeats] = useState(0);
+  const [reimbChecked, setReimbChecked] = useState(false);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [reqMgr, setReqMgr] = useState(true);
 
   useEffect(() => {
-    if (billing) setSeats((s) => s || Math.max(FREE_SEAT_LIMIT + 1, seatsUsed, billing.seats ?? 0));
+    if (billing) setSeats((s) => s || Math.max(seatsUsed, billing.seats ?? 0, 1));
   }, [billing, seatsUsed]);
   useEffect(() => {
     if (billing?.id) listPayments(billing.id).then(setPayments).catch(() => {});
@@ -630,16 +670,16 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
   const limitText = limit === Infinity ? 'Unlimited' : String(limit);
   const daysLeft = periodDaysLeft(billing);
   const over = atSeatLimit(billing, seatsUsed);
-  const minSeats = Math.max(FREE_SEAT_LIMIT + 1, seatsUsed);
+  const minSeats = Math.max(seatsUsed, 1);
   const qty = Math.max(minSeats, Math.floor(seats) || 0);
-  const quote = quoteFor(billing, qty);
+  const reimbActive = reimbursementActive(billing);
+  // One unified quote: seat cost + (if the add-on is ticked or already active)
+  // the ₹5/emp/mo reimbursement add-on — paid through a single button.
+  const reimbWanted = reimbActive || reimbChecked;
+  const quote = quoteFor(billing, qty, reimbWanted);
+  const seatPortion = quote.amount - quote.addonAmount;
   const periodEndText = billing.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—';
   const statusText = paid ? 'active' : billing.subscription_status === 'active' ? 'expired' : 'free';
-  const reimbActive = reimbursementActive(billing);
-  // The add-on is priced on the real headcount (incl. free orgs ≤5), not the
-  // seat-purchase minimum of 6.
-  const addonSeats = paid ? (billing.seats ?? Math.max(seatsUsed, 1)) : Math.max(seatsUsed, 1);
-  const addonQuote = quoteFor(billing, addonSeats, true);
 
   const checkout = async (chkSeats: number, reimbursement: boolean, ok: string) => {
     setBusy(true);
@@ -653,7 +693,7 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
       onToast(msg, msg.toLowerCase().includes('cancel') ? 'amber' : 'red', msg.toLowerCase().includes('cancel') ? 'wallet' : 'xCircle');
     } finally { setBusy(false); }
   };
-  const pay = () => checkout(qty, false, quote.renewal ? `Payment received — ${qty} seats for 1 year` : `Payment received — seats raised to ${qty}`);
+  const pay = () => checkout(qty, reimbWanted, quote.renewal ? 'Payment received — renewed for 1 year' : 'Payment received — plan updated');
 
   const toggleReqMgr = async (val: boolean) => {
     setReqMgr(val);
@@ -710,21 +750,32 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
 
       {canManage && (
         <ACard style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 12 }}>{quote.renewal ? 'Renew — 1 year' : paid ? 'Add seats' : 'Upgrade beyond the free plan'}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            <input type="number" min={minSeats} value={seats || qty} onChange={(e) => setSeats(Number(e.target.value))} style={seatInput} aria-label="Number of seats" />
-            <div style={{ fontSize: 14, color: 'var(--ink-2)', fontWeight: 600 }}>
-              {qty} seats →
-              {quote.prorated
-                ? <> <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(quote.amount)}</span> now <span style={{ color: 'var(--ink-3)' }}>(prorated to {quote.periodEnd.toLocaleDateString()})</span></>
-                : <> <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(quote.amount)}</span> {quote.renewal ? '/ year' : 'now'}</>}
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 12 }}>{quote.renewal ? 'Renew — 1 year' : paid ? 'Change plan' : 'Buy seats / add-ons'}</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 600, marginBottom: 5 }}>Employees / seats</div>
+              <input type="number" min={minSeats} value={seats || qty} onChange={(e) => setSeats(Number(e.target.value))} style={seatInput} aria-label="Number of seats" />
             </div>
-            <button onClick={() => { void pay(); }} disabled={busy || quote.amount <= 0} style={{ ...payBtn, opacity: busy || quote.amount <= 0 ? 0.7 : 1 }}>{busy ? 'Processing…' : `Pay ${fmtINR(quote.amount)}`}</button>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 9, height: 42, padding: '0 14px', borderRadius: 11, border: `1px solid ${reimbWanted ? 'var(--accent)' : 'var(--line)'}`, background: reimbWanted ? 'var(--accent-soft)' : 'var(--panel)', cursor: reimbActive ? 'default' : 'pointer' }}>
+              <input type="checkbox" checked={reimbWanted} disabled={reimbActive} onChange={(e) => setReimbChecked(e.target.checked)} style={{ width: 17, height: 17, accentColor: 'var(--accent)', cursor: reimbActive ? 'default' : 'pointer' }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>Reimbursement add-on {reimbActive ? '(active)' : `· ₹${REIMBURSEMENT_RATE}/emp/mo`}</span>
+            </label>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 16, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 14, color: 'var(--ink-2)', fontWeight: 600 }}>
+              {quote.amount > 0 ? (
+                <>
+                  {seatPortion > 0 && <>Seats <b style={{ color: 'var(--ink-1)' }}>{fmtINR(seatPortion)}</b></>}
+                  {seatPortion > 0 && quote.addonAmount > 0 && <span style={{ color: 'var(--ink-3)' }}> + </span>}
+                  {quote.addonAmount > 0 && <>Reimbursement <b style={{ color: 'var(--ink-1)' }}>{fmtINR(quote.addonAmount)}</b></>}
+                  {' = '}<b style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(quote.amount)}</b> {quote.prorated ? <span style={{ color: 'var(--ink-3)' }}>now (prorated to {quote.periodEnd.toLocaleDateString()})</span> : quote.renewal ? '/ year' : 'now'}
+                </>
+              ) : <span style={{ color: 'var(--ink-3)' }}>Nothing due — add seats (6+) or tick the add-on.</span>}
+            </div>
+            <button onClick={() => { void pay(); }} disabled={busy || quote.amount <= 0} style={{ ...payBtn, marginLeft: 'auto', opacity: busy || quote.amount <= 0 ? 0.7 : 1 }}>{busy ? 'Processing…' : `Pay ${fmtINR(quote.amount)}`}</button>
           </div>
           <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 10 }}>
-            Minimum {minSeats} seats (your current roster). {quote.renewal
-              ? `Starts a fresh 1-year period at ${fmtINR(quote.annualAtRenewal)}/year.`
-              : `You pay only the additional cost for the days left in your period; it then renews at ${fmtINR(quote.annualAtRenewal)}/year.`} UPI, cards and netbanking accepted.
+            {quote.renewal ? 'Starts a fresh 1-year period.' : `Prorated for the days left in your period; renews at ${fmtINR(quote.annualAtRenewal)}/year.`} Minimum {minSeats} seat{minSeats === 1 ? '' : 's'} (your roster). UPI, cards & netbanking accepted.
           </div>
         </ACard>
       )}
@@ -750,19 +801,10 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
               {reqMgr ? 'Claims route Employee → Manager → HR → paid (employees without a manager skip to HR).' : 'Claims route Employee → HR → paid (manager step skipped).'}
             </div>
           </div>
-        ) : canManage ? (
-          <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 14, color: 'var(--ink-2)', fontWeight: 600 }}>
-              {addonSeats} employee{addonSeats === 1 ? '' : 's'} →
-              {addonQuote.prorated
-                ? <> <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(addonQuote.addonAmount)}</span> now <span style={{ color: 'var(--ink-3)' }}>(prorated to {addonQuote.periodEnd.toLocaleDateString()})</span></>
-                : <> <span style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(addonQuote.addonAmount)}</span> {addonQuote.renewal ? '/ year' : 'now'}</>}
-            </div>
-            <button onClick={() => checkout(addonSeats, true, 'Reimbursement add-on enabled')} disabled={busy || addonQuote.addonAmount <= 0} style={{ ...payBtn, opacity: busy || addonQuote.addonAmount <= 0 ? 0.7 : 1 }}>{busy ? 'Processing…' : `Enable · ${fmtINR(addonQuote.addonAmount)}`}</button>
-            <div style={{ width: '100%', fontSize: 12, color: 'var(--ink-3)' }}>Then renews at {fmtINR(addonAnnual(addonSeats))}/year with your plan.</div>
-          </div>
         ) : (
-          <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--ink-3)' }}>Ask an owner or HR admin to enable this add-on.</div>
+          <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid var(--line)', fontSize: 12.5, color: 'var(--ink-3)' }}>
+            {canManage ? 'Tick “Reimbursement add-on” in the box above and pay to switch it on.' : 'Ask an owner or HR admin to enable this add-on.'}
+          </div>
         )}
       </ACard>
 
