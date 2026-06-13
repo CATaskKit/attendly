@@ -211,18 +211,36 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
         </Card>
       </div>
 
-      {ctx.reimbursementEnabled && (
-        <Card pad={14} onClick={() => ctx.openOverlay('reimbursements')} style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 13 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Icon name="receipt" size={22} color="var(--accent)" />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>Reimbursements</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{ctx.reimbursements.length ? `${ctx.reimbursements.filter((r) => r.status === 'Pending').length} pending · ${ctx.reimbursements.length} total` : 'Submit & track expense claims'}</div>
-          </div>
-          <Icon name="chevronRight" size={18} color="var(--text-3)" />
-        </Card>
-      )}
+      {(ctx.reimbursementEnabled || ctx.reimbursements.length > 0) && (() => {
+        const mine = ctx.reimbursements;
+        const inr = (n: number) => '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n);
+        const sum = (st: string) => mine.filter((r) => r.status === st).reduce((a, r) => a + Number(r.amount || 0), 0);
+        const pendingCount = mine.filter((r) => r.status === 'Pending').length;
+        return (
+          <Card pad={15} onClick={() => ctx.openOverlay('reimbursements')} style={{ marginTop: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon name="receipt" size={21} color="var(--accent)" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>Reimbursements</div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{mine.length ? `${pendingCount} awaiting approval · tap to add or track` : 'Submit & track expense claims'}</div>
+              </div>
+              <Icon name="chevronRight" size={18} color="var(--text-3)" />
+            </div>
+            {mine.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 13, paddingTop: 13, borderTop: 'var(--card-border)' }}>
+                {([['Pending', sum('Pending'), 'var(--warning)'], ['Approved', sum('Approved'), 'var(--accent)'], ['Paid', sum('Paid'), 'var(--success)']] as const).map(([label, val, color]) => (
+                  <div key={label} style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>{label}</div>
+                    <div style={{ fontSize: 15.5, fontWeight: 800, color, marginTop: 2, letterSpacing: '-0.01em' }}>{inr(val)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      })()}
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle action="View all" onAction={() => ctx.setTab('attendance')}>This week</SectionTitle>
