@@ -1,7 +1,7 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { AIcon, AAvatar, ACard, APill, KPI, Segmented, BtnPrimary, BtnGhost, PageHead } from './ui';
 import {
-  decideReimbursement, bulkDecideReimbursements, markReimbursementsPaid, signedReceiptUrl,
+  decideReimbursement, bulkDecideReimbursements, markReimbursementsPaid, deleteReimbursement, signedReceiptUrl,
   type Reimbursement,
 } from '../lib/api';
 import { reimbursementActive, fmtINR, type OrgBilling } from '../lib/billing';
@@ -46,6 +46,7 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [payFor, setPayFor] = useState<Reimbursement[] | null>(null);
+  const [voidFor, setVoidFor] = useState<Reimbursement | null>(null);
 
   const active = billing ? reimbursementActive(billing) : false;
   const isHR = role === 'owner' || role === 'hr';
@@ -67,7 +68,7 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const clearSel = () => setSelected(new Set());
 
-  if (!active) {
+  if (!active && rows.length === 0) {
     return (
       <div>
         <PageHead title="Reimbursements" sub="Expense & convenience claims" />
@@ -110,6 +111,14 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
       <PageHead title="Reimbursements" sub={`${counts.Pending} pending · ${counts.Approved} awaiting payout`}>
         <BtnGhost icon="download" onClick={() => zip(shown, `reimbursements-${tab.toLowerCase()}`)} disabled={busy}>Download ZIP + report</BtnGhost>
       </PageHead>
+
+      {!active && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: '10px 14px', borderRadius: 10, background: 'var(--soft)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 600 }}>
+          <AIcon name="receipt" size={15} color="var(--ink-3)" />
+          The reimbursement add-on is off — employees can't submit new claims, but you can still review, pay out, delete, and export existing ones.
+          {isHR && <button onClick={onGoBilling} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>Re-enable</button>}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 16 }}>
         <KPI icon="receipt" label="Pending claims" value={counts.Pending} tone="amber" />
@@ -185,6 +194,11 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
                     {isHR && r.status === 'Approved' && (
                       <BtnPrimary icon="wallet" onClick={() => setPayFor([r])} disabled={busy}>Mark paid</BtnPrimary>
                     )}
+                    {isHR && (
+                      <button onClick={() => setVoidFor(r)} disabled={busy} title="Delete claim" style={{ ...iconBtn('red'), background: 'transparent', border: '1px solid var(--line)', width: 32, height: 32 }}>
+                        <AIcon name="trash" size={15} color="var(--ink-3)" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </ACard>
@@ -194,6 +208,26 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
       )}
 
       {payFor && <PaidModal rows={payFor} onClose={() => setPayFor(null)} onConfirm={(ref) => { const list = payFor; setPayFor(null); run(() => markReimbursementsPaid(list, ref), `Marked ${list.length} paid`); }} />}
+      {voidFor && <VoidModal row={voidFor} onClose={() => setVoidFor(null)} onConfirm={() => { const row = voidFor; setVoidFor(null); run(() => deleteReimbursement(row), 'Claim deleted'); }} />}
+    </div>
+  );
+}
+
+function VoidModal({ row, onClose, onConfirm }: { row: Reimbursement; onClose: () => void; onConfirm: () => void }) {
+  const files = row.attachments?.length ?? 0;
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(8,12,20,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--panel)', borderRadius: 16, padding: 24, width: 420, maxWidth: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 800, color: 'var(--ink-1)' }}>Delete this claim?</h3>
+        <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+          {row.emp || 'This'}'s <b style={{ color: 'var(--ink-1)' }}>{row.category}</b> claim of <b style={{ color: 'var(--ink-1)' }}>{fmtINR(Number(row.amount))}</b>{files ? ` and its ${files} receipt${files === 1 ? '' : 's'}` : ''} will be permanently removed. This can't be undone.
+          {row.status === 'Paid' && <><br /><span style={{ color: 'var(--red)', fontWeight: 600 }}>Note: this claim is already marked paid.</span></>}
+        </p>
+        <div style={{ display: 'flex', gap: 10, marginTop: 4, justifyContent: 'flex-end' }}>
+          <BtnGhost onClick={onClose}>Cancel</BtnGhost>
+          <BtnPrimary icon="trash" tone="red" onClick={onConfirm}>Delete claim</BtnPrimary>
+        </div>
+      </div>
     </div>
   );
 }

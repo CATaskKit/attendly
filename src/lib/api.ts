@@ -756,6 +756,14 @@ export async function bulkDecideReimbursements(rows: Reimbursement[], action: 'a
   for (const row of rows) await decideReimbursement(row, action);
 }
 
+/** Owner/HR only: permanently delete a claim and its receipt files. */
+export async function deleteReimbursement(row: Reimbursement): Promise<void> {
+  const paths = (row.attachments ?? []).map((a) => a.path).filter(Boolean);
+  if (paths.length) await db().storage.from(RECEIPTS_BUCKET).remove(paths).catch(() => undefined);
+  const { error } = await db().from('reimbursements').delete().eq('id', row.id);
+  if (error) throw error;
+}
+
 export async function markReimbursementsPaid(rows: Reimbursement[], ref?: string): Promise<void> {
   const uid = await currentUid();
   const ids = rows.map((r) => r.id);
