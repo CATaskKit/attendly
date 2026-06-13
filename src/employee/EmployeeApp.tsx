@@ -5,7 +5,8 @@ import {
   applyLeave, checkIn, checkOut, decideTeamLeave, ensureMyEmployee, getTodayAttendance,
   listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
   applyReimbursement, myReimbursements,
-  type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow, type Reimbursement,
+  listAnnouncements, listAnnouncementReads, markAnnouncementRead,
+  type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow, type Reimbursement, type Announcement,
 } from '../lib/api';
 import { onTablesChange } from '../lib/realtime';
 import { fetchBilling, reimbursementActive } from '../lib/billing';
@@ -17,7 +18,7 @@ import { collectAttendanceAudit, getDeviceInfo, type AttendanceAudit } from '../
 import { fetchNetworkTime, formatAppDate, APP_TIME_ZONE } from '../lib/networkTime';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
-import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen } from './overlays';
+import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen, AnnouncementsScreen } from './overlays';
 import { INITIAL_LEAVE, INITIAL_TEAM, type Ctx, type LeaveRequest, type Status, type TeamRequest } from './data';
 
 const isoDate = (d: Date) => formatAppDate(d);
@@ -156,6 +157,8 @@ export default function EmployeeApp() {
   const [teamRows, setTeamRows] = useState<LeaveRow[]>([]);
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [reimbState, setReimbState] = useState<{ enabled: boolean; requireManager: boolean }>({ enabled: false, requireManager: true });
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [readAnnIds, setReadAnnIds] = useState<Set<string>>(new Set());
   const [attendanceAudit, setAttendanceAudit] = useState<AttendanceAudit>(() => ({ location: null, ip: null, device: getDeviceInfo() }));
 
   const [tab, setTab] = useState('home');
@@ -203,7 +206,7 @@ export default function EmployeeApp() {
     try {
       const emp = await ensureMyEmployee(profile);
       setEmployee(emp);
-      const [leaveRows, attRows, balances, holidayRows, today, approvals, reimbRows, billing] = await Promise.all([
+      const [leaveRows, attRows, balances, holidayRows, today, approvals, reimbRows, billing, annRows, annReads] = await Promise.all([
         myLeave(profile, emp),
         listMyAttendance(orgId, emp),
         myLeaveBalances(orgId, emp),
@@ -212,6 +215,8 @@ export default function EmployeeApp() {
         canApproveTeam ? listMyTeamLeave(profile, emp) : Promise.resolve([]),
         myReimbursements().catch(() => [] as Reimbursement[]),
         fetchBilling(orgId).catch(() => null),
+        listAnnouncements().catch(() => [] as Announcement[]),
+        listAnnouncementReads().catch(() => []),
       ]);
       setLeaveRequests(leaveRows.map(mapLeave));
       setAttendanceRows(attRows);
@@ -221,6 +226,8 @@ export default function EmployeeApp() {
       setTeamRequests(approvals.map(mapTeamLeave));
       setReimbursements(reimbRows);
       setReimbState({ enabled: billing ? reimbursementActive(billing) : false, requireManager: billing?.reimbursement_require_manager ?? true });
+      setAnnouncements(annRows);
+      setReadAnnIds(new Set(annReads.map((r) => r.announcement_id)));
       if (today) setAttendanceAudit({ location: today.location, ip: today.ip, device: today.device || getDeviceInfo() });
       applyTodayState(today);
     } catch (e) {
@@ -232,7 +239,7 @@ export default function EmployeeApp() {
   // Live updates: refresh when leave/attendance change for this tenant.
   useEffect(() => {
     if (!live) return;
-    return onTablesChange(['leave_requests', 'attendance', 'reimbursements'], () => { void reloadLive(); });
+    return onTablesChange(['leave_requests', 'attendance', 'reimbursements', 'announcements'], () => { void reloadLive(); });
   }, [live, reloadLive]);
 
   // Notifications (live).
@@ -260,6 +267,8 @@ export default function EmployeeApp() {
     setTeamRequests(INITIAL_TEAM);
     setReimbursements([]);
     setReimbState({ enabled: false, requireManager: true });
+    setAnnouncements([]);
+    setReadAnnIds(new Set());
   }, [live]);
 
   const showToast = (text: string, icon = 'checkCircle') => {
@@ -384,6 +393,14 @@ export default function EmployeeApp() {
         .then(() => showToast('Reimbursement claim submitted', 'checkCircle'))
         .catch((err) => { console.error(err); showToast(err instanceof Error ? err.message : 'Could not submit claim', 'x'); void reloadLive(); });
     },
+    announcements,
+    unreadAnnouncements: announcements.filter((a) => !readAnnIds.has(a.id)).length,
+    isAnnouncementRead: (id: string) => readAnnIds.has(id),
+    markAnnouncementRead: (id: string) => {
+      if (readAnnIds.has(id)) return;
+      setReadAnnIds((prev) => new Set(prev).add(id));
+      if (live) void markAnnouncementRead(id).catch(console.error);
+    },
   };
 
   const vars = themeVars(t);
@@ -409,6 +426,7 @@ export default function EmployeeApp() {
         {overlay === 'checkout' && <CheckOutScreen ctx={ctx} />}
         {overlay === 'applyleave' && <ApplyLeaveScreen ctx={ctx} />}
         {overlay === 'reimbursements' && <ReimbursementsScreen ctx={ctx} />}
+        {overlay === 'announcements' && <AnnouncementsScreen ctx={ctx} />}
         {overlay === 'notifications' && <NotificationsScreen ctx={ctx} />}
         {overlay === 'logout' && <LogoutConfirm onCancel={ctx.closeOverlay} onConfirm={ctx.logout} />}
 

@@ -94,9 +94,13 @@ export function atSeatLimit(b: Pick<OrgBilling, 'subscription_status' | 'current
   return seatsUsed >= seatLimit(b);
 }
 
-/** Reimbursement add-on is paid for and inside an open period. */
-export function reimbursementActive(b: Pick<OrgBilling, 'reimbursement_enabled' | 'current_period_end'>): boolean {
-  return !!b.reimbursement_enabled && periodValid(b);
+/**
+ * Whether reimbursement is usable. Free-tier orgs (≤5 employees / not on a paid
+ * seat plan) get it **free**; paid orgs (>5 seats) need the ₹5/emp/mo add-on.
+ */
+export function reimbursementActive(b: Pick<OrgBilling, 'reimbursement_enabled' | 'current_period_end' | 'subscription_status' | 'seats'>): boolean {
+  if (!isPaid(b)) return true;                          // ≤5 free tier — included free
+  return !!b.reimbursement_enabled && periodValid(b);   // >5 — requires the add-on
 }
 
 export type Quote = { amount: number; addonAmount: number; prorated: boolean; renewal: boolean; periodEnd: Date; annualAtRenewal: number };
@@ -114,13 +118,17 @@ export function quoteFor(
 ): Quote {
   const valid = periodValid(b);
   const frac = valid ? periodFraction(b) : 1;
-  const alreadyReimb = reimbursementActive(b);
-  const wantReimb = reimbursement ?? alreadyReimb;
+  // "Already paid the add-on" is the paid flag — NOT free-tier inclusion, so an
+  // org growing past 5 still gets charged the add-on if it wants it.
+  const alreadyReimb = !!b.reimbursement_enabled && valid;
+  const wantReimb = reimbursement ?? reimbursementActive(b);
+  // The add-on is free at ≤5 seats; only >5 is charged ₹5×seats×12.
+  const addonRate = newSeats > FREE_SEAT_LIMIT ? addonAnnual(newSeats) : 0;
 
   const seatYr = valid ? annualTotal(newSeats) - annualTotal(currentPaidSeats(b)) : annualTotal(newSeats);
   const addonYr = valid
-    ? (wantReimb && !alreadyReimb ? addonAnnual(newSeats) : 0) // enabling within the period
-    : (wantReimb ? addonAnnual(newSeats) : 0);                  // fresh year includes it if wanted
+    ? (wantReimb && !alreadyReimb ? addonRate : 0) // enabling within the period
+    : (wantReimb ? addonRate : 0);                  // fresh year includes it if wanted
 
   return {
     amount: Math.max(0, Math.round((seatYr + addonYr) * frac)),
@@ -128,7 +136,7 @@ export function quoteFor(
     prorated: valid && frac < 1,
     renewal: !valid,
     periodEnd: valid ? new Date(b.current_period_end!) : new Date(Date.now() + YEAR_MS),
-    annualAtRenewal: annualTotal(newSeats) + (wantReimb ? addonAnnual(newSeats) : 0),
+    annualAtRenewal: annualTotal(newSeats) + (wantReimb ? addonRate : 0),
   };
 }
 

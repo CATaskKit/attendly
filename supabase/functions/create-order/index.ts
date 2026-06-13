@@ -55,12 +55,14 @@ Deno.serve(async (req) => {
     const fraction = valid ? Math.min(1, Math.max(0, (periodEndMs - now) / YEAR_MS)) : 1;
     const alreadyReimb = org?.reimbursement_enabled === true && valid;
     const wantReimb = Boolean(reimbursement) || alreadyReimb;
+    // Reimbursement is free for ≤5-employee orgs; only >5 pays ₹5×seats×12.
+    const addonRate = seats > 5 ? addonAnnual(seats) : 0;
 
     const seatYr = valid ? annual(seats) - annual(paidSeats) : annual(seats);
-    const addonYr = valid ? (wantReimb && !alreadyReimb ? addonAnnual(seats) : 0) : (wantReimb ? addonAnnual(seats) : 0);
+    const addonYr = valid ? (wantReimb && !alreadyReimb ? addonRate : 0) : (wantReimb ? addonRate : 0);
     const amountInr = Math.max(0, Math.round((seatYr + addonYr) * fraction));
     if (amountInr <= 0) {
-      return json({ error: seats <= 5 && !wantReimb ? 'Up to 5 employees are free — no payment needed' : 'No additional charge needed' }, 400);
+      return json({ error: seats <= 5 ? 'Up to 5 employees are free — reimbursement is included, no payment needed' : 'No additional charge needed' }, 400);
     }
     const amount = amountInr * 100; // paise
     const newPeriodEnd = (valid ? new Date(periodEndMs) : new Date(now + YEAR_MS)).toISOString();

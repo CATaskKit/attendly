@@ -211,6 +211,20 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
         </Card>
       </div>
 
+      {ctx.announcements.length > 0 && (
+        <Card pad={14} onClick={() => ctx.openOverlay('announcements')} style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 13 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
+            <Icon name="bell" size={22} color="var(--accent)" />
+            {ctx.unreadAnnouncements > 0 && <span style={{ position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, background: 'var(--danger)', color: '#fff', fontSize: 10.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{ctx.unreadAnnouncements}</span>}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>Announcements</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ctx.unreadAnnouncements > 0 ? `${ctx.unreadAnnouncements} new · ${ctx.announcements[0].title}` : ctx.announcements[0].title}</div>
+          </div>
+          <Icon name="chevronRight" size={18} color="var(--text-3)" />
+        </Card>
+      )}
+
       {(ctx.reimbursementEnabled || ctx.reimbursements.length > 0) && (() => {
         const mine = ctx.reimbursements;
         const inr = (n: number) => '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n);

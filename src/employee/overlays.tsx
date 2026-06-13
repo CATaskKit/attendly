@@ -445,6 +445,41 @@ export function NotificationsScreen({ ctx }: { ctx: Ctx }) {
   );
 }
 
+// ── Announcements ────────────────────────────────────────────────────
+export function AnnouncementsScreen({ ctx }: { ctx: Ctx }) {
+  const { announcements, isAnnouncementRead, markAnnouncementRead, unreadAnnouncements, closeOverlay } = ctx;
+  const fmt = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return (
+    <Overlay title="Announcements" onClose={closeOverlay}
+      footer={unreadAnnouncements > 0 ? <button onClick={() => announcements.forEach((a) => markAnnouncementRead(a.id))} style={primaryBtn}>Mark all read</button> : undefined}>
+      {announcements.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-3)' }}>
+          <Icon name="bell" size={34} color="var(--text-3)" />
+          <div style={{ marginTop: 12, fontSize: 14.5, fontWeight: 700, color: 'var(--text-2)' }}>No announcements</div>
+          <div style={{ fontSize: 12.5, marginTop: 4 }}>Company updates from HR show up here.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {announcements.map((a) => {
+            const read = isAnnouncementRead(a.id);
+            return (
+              <Card key={a.id} pad={15} onClick={() => markAnnouncementRead(a.id)} style={{ background: read ? 'var(--card)' : 'var(--accent-soft)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 4 }}>
+                  {a.pinned && <Icon name="bell" size={14} color="var(--accent)" />}
+                  <span style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--text-1)', flex: 1 }}>{a.title}</span>
+                  {!read && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{a.body}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 8, fontWeight: 600 }}>{a.author || 'Admin'} · {fmt(a.created_at)}</div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </Overlay>
+  );
+}
+
 // ── Reimbursements ───────────────────────────────────────────────────
 const REIMB_CATEGORIES = [
   { id: 'Travel', icon: 'mapPin' },

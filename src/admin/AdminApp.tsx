@@ -8,7 +8,8 @@ import {
 import {
   listEmployees, addEmployee, deleteEmployee, listLeave, decideLeave, listHolidays, addHoliday, deleteHoliday,
   dashboardStats, hasEmployees, seedSampleData, getOrganization, updateOrganization, listReimbursements,
-  type Employee, type LeaveRow, type Holiday, type Stats, type Reimbursement,
+  listAnnouncements, listAnnouncementReads,
+  type Employee, type LeaveRow, type Holiday, type Stats, type Reimbursement, type Announcement, type AnnouncementRead,
 } from '../lib/api';
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
@@ -17,6 +18,7 @@ import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDa
 import Settings from './Settings';
 import { AttendanceMIS, PayrollMIS } from './mis';
 import { Reimbursements } from './reimbursements';
+import { Announcements } from './announcements';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -24,7 +26,7 @@ const fmtRange = (a: string | null, b: string | null) => {
   return a === b ? f(a) : `${f(a)} – ${f(b)}`;
 };
 
-type Page = 'dashboard' | 'approvals' | 'employees' | 'attendance' | 'holidays' | 'payroll' | 'reimbursements' | 'reports' | 'settings' | 'billing';
+type Page = 'dashboard' | 'approvals' | 'employees' | 'attendance' | 'holidays' | 'payroll' | 'reimbursements' | 'announcements' | 'reports' | 'settings' | 'billing';
 const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'dashboard', icon: 'grid', label: 'Dashboard' },
   { id: 'approvals', icon: 'inbox', label: 'Leave Approvals' },
@@ -33,6 +35,7 @@ const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'holidays', icon: 'calendar', label: 'Holidays' },
   { id: 'payroll', icon: 'briefcase', label: 'Payroll' },
   { id: 'reimbursements', icon: 'receipt', label: 'Reimbursements' },
+  { id: 'announcements', icon: 'bell', label: 'Announcements' },
   { id: 'reports', icon: 'download', label: 'Reports & export' },
   { id: 'settings', icon: 'settings', label: 'Settings' },
   { id: 'billing', icon: 'wallet', label: 'Billing' },
@@ -52,6 +55,8 @@ export default function AdminApp() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [billing, setBilling] = useState<OrgBilling | null>(null);
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [announcementReads, setAnnouncementReads] = useState<AnnouncementRead[]>([]);
   const [toast, setToast] = useState<{ text: string; tone: string; icon: string } | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [search, setSearch] = useState('');
@@ -59,12 +64,15 @@ export default function AdminApp() {
   const fire = (text: string, tone = 'green', icon = 'checkCircle') => { setToast({ text, tone, icon }); setTimeout(() => setToast(null), 2600); };
 
   const reload = useCallback(async () => {
-    const [emp, lv, hol, st, bill, reimb] = await Promise.all([
+    const [emp, lv, hol, st, bill, reimb, anns, annReads] = await Promise.all([
       listEmployees(), listLeave(), listHolidays(), dashboardStats(),
       orgId ? fetchBilling(orgId) : Promise.resolve(null),
       listReimbursements().catch(() => [] as Reimbursement[]),
+      listAnnouncements().catch(() => [] as Announcement[]),
+      listAnnouncementReads().catch(() => [] as AnnouncementRead[]),
     ]);
     setEmployees(emp); setLeave(lv); setHolidays(hol); setStats(st); setBilling(bill); setReimbursements(reimb);
+    setAnnouncements(anns); setAnnouncementReads(annReads);
   }, [orgId]);
 
   useEffect(() => {
@@ -76,7 +84,7 @@ export default function AdminApp() {
   }, [reload]);
 
   // Live updates: refresh whenever leave/attendance/employees change anywhere.
-  useEffect(() => onTablesChange(['leave_requests', 'attendance', 'employees', 'reimbursements'], () => { void reload(); }), [reload]);
+  useEffect(() => onTablesChange(['leave_requests', 'attendance', 'employees', 'reimbursements', 'announcements'], () => { void reload(); }), [reload]);
 
   const onSeed = async () => {
     if (!orgId) return;
@@ -197,6 +205,8 @@ export default function AdminApp() {
               <PayrollMIS orgId={orgId} employees={employees} leave={leave} canManage={canManage} onToast={fire} />
             ) : page === 'reimbursements' ? (
               <Reimbursements rows={reimbursements} role={role} billing={billing} onChanged={() => { void reload(); }} onToast={fire} onGoBilling={() => setPage('billing')} />
+            ) : page === 'announcements' ? (
+              <Announcements orgId={orgId} rows={announcements} reads={announcementReads} memberCount={employees.length} role={role} authorName={profile?.full_name || 'Admin'} onChanged={() => { void reload(); }} onToast={fire} />
             ) : !canManage && employees.length === 0 ? <EmptyManager />
             : employees.length === 0 && leave.length === 0 ? (
               <EmptyState seeding={seeding} canSeed={canManage} onSeed={onSeed} />
@@ -758,7 +768,7 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 9, height: 42, padding: '0 14px', borderRadius: 11, border: `1px solid ${reimbWanted ? 'var(--accent)' : 'var(--line)'}`, background: reimbWanted ? 'var(--accent-soft)' : 'var(--panel)', cursor: reimbActive ? 'default' : 'pointer' }}>
               <input type="checkbox" checked={reimbWanted} disabled={reimbActive} onChange={(e) => setReimbChecked(e.target.checked)} style={{ width: 17, height: 17, accentColor: 'var(--accent)', cursor: reimbActive ? 'default' : 'pointer' }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>Reimbursement add-on {reimbActive ? '(active)' : `· ₹${REIMBURSEMENT_RATE}/emp/mo`}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>Reimbursement add-on {reimbActive ? (paid ? '(active)' : '(free on your plan)') : `· ₹${REIMBURSEMENT_RATE}/emp/mo`}</span>
             </label>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 16, flexWrap: 'wrap' }}>
@@ -787,9 +797,9 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Reimbursement add-on</div>
-            <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Expense claims with receipts, approvals & payouts · ₹{REIMBURSEMENT_RATE} / employee / month</div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Expense claims with receipts, approvals & payouts · {paid ? `₹${REIMBURSEMENT_RATE} / employee / month` : `free on the ${FREE_SEAT_LIMIT}-employee plan`}</div>
           </div>
-          {reimbActive && <APill tone="green"><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />Active</APill>}
+          {reimbActive && <APill tone="green"><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />{paid ? 'Active' : 'Included'}</APill>}
         </div>
         {reimbActive ? (
           <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid var(--line)' }}>

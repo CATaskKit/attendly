@@ -773,3 +773,44 @@ export async function markReimbursementsPaid(rows: Reimbursement[], ref?: string
     .in('id', ids);
   if (error) throw error;
 }
+
+// ── Announcements ─────────────────────────────────────────────────────
+export type Announcement = {
+  id: string; org_id: string; created_by: string | null; author: string | null;
+  title: string; body: string; pinned: boolean; created_at: string;
+};
+export type AnnouncementRead = { announcement_id: string; user_id: string; read_at: string };
+
+export async function listAnnouncements(): Promise<Announcement[]> {
+  const { data, error } = await db().from('announcements').select('*')
+    .order('pinned', { ascending: false }).order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as Announcement[];
+}
+
+export async function createAnnouncement(orgId: string, p: { title: string; body: string; author?: string | null; pinned?: boolean }): Promise<void> {
+  const { error } = await db().from('announcements').insert({
+    org_id: orgId, title: p.title, body: p.body, author: p.author ?? null, pinned: !!p.pinned,
+  });
+  if (error) throw error;
+}
+
+export async function deleteAnnouncement(id: string): Promise<void> {
+  const { error } = await db().from('announcements').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** Reads visible to the caller: an employee sees their own; an admin sees all. */
+export async function listAnnouncementReads(): Promise<AnnouncementRead[]> {
+  const { data, error } = await db().from('announcement_reads').select('announcement_id,user_id,read_at');
+  if (error) throw error;
+  return (data ?? []) as AnnouncementRead[];
+}
+
+export async function markAnnouncementRead(id: string): Promise<void> {
+  const uid = await currentUid();
+  if (!uid) return;
+  const { error } = await db().from('announcement_reads')
+    .upsert({ announcement_id: id, user_id: uid }, { onConflict: 'announcement_id,user_id', ignoreDuplicates: true });
+  if (error) throw error;
+}
