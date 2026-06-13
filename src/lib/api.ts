@@ -155,7 +155,7 @@ export async function listLeaveTypes(): Promise<LeaveType[]> {
 }
 
 // ── Organization + onboarding writes ──────────────────────────────────
-export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean };
+export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean; reimbursement_disabled?: boolean };
 
 export async function getOrganization(orgId: string): Promise<OrgRow | null> {
   const { data, error } = await db().from('organizations').select('*').eq('id', orgId).single();

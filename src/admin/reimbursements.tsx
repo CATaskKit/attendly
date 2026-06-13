@@ -68,7 +68,7 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const clearSel = () => setSelected(new Set());
 
-  if (!active && rows.length === 0) {
+  if (!active) {
     return (
       <div>
         <PageHead title="Reimbursements" sub="Expense & convenience claims" />
@@ -111,14 +111,6 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
       <PageHead title="Reimbursements" sub={`${counts.Pending} pending · ${counts.Approved} awaiting payout`}>
         <BtnGhost icon="download" onClick={() => zip(shown, `reimbursements-${tab.toLowerCase()}`)} disabled={busy}>Download ZIP + report</BtnGhost>
       </PageHead>
-
-      {!active && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: '10px 14px', borderRadius: 10, background: 'var(--soft)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 600 }}>
-          <AIcon name="receipt" size={15} color="var(--ink-3)" />
-          The reimbursement add-on is off — employees can't submit new claims, but you can still review, pay out, delete, and export existing ones.
-          {isHR && <button onClick={onGoBilling} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>Re-enable</button>}
-        </div>
-      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 16 }}>
         <KPI icon="receipt" label="Pending claims" value={counts.Pending} tone="amber" />

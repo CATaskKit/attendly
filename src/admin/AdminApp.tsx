@@ -14,7 +14,7 @@ import {
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
-import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, type OrgBilling, type PaymentRow } from '../lib/billing';
+import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, reimbursementEntitled, type OrgBilling, type PaymentRow } from '../lib/billing';
 import Settings from './Settings';
 import { AttendanceMIS, PayrollMIS } from './mis';
 import { Reimbursements } from './reimbursements';
@@ -148,7 +148,7 @@ export default function AdminApp() {
           <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em' }}>Attendly</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {NAV.map((it) => {
+          {NAV.filter((it) => it.id !== 'reimbursements' || !billing || reimbursementActive(billing)).map((it) => {
             const on = page === it.id;
             return (
               <button key={it.id} onClick={() => setPage(it.id)} style={{
@@ -255,7 +255,7 @@ function EmptyManager() {
 // ── Dashboard ─────────────────────────────────────────────────────────
 function Dashboard({ stats, leave, reimbursements, reimbEnabled, announcements, announcementReads, memberCount, canManage, onGo, onDecide }: { stats: Stats | null; leave: LeaveRow[]; reimbursements: Reimbursement[]; reimbEnabled: boolean; announcements: Announcement[]; announcementReads: AnnouncementRead[]; memberCount: number; canManage: boolean; onGo: (p: Page) => void; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
   const pending = leave.filter((l) => l.status === 'Pending');
-  const showReimb = reimbEnabled || reimbursements.length > 0;
+  const showReimb = reimbEnabled; // hidden entirely when the add-on is off
   const reimbPending = reimbursements.filter((r) => r.status === 'Pending');
   const reimbApproved = reimbursements.filter((r) => r.status === 'Approved');
   const awaitingPayout = reimbApproved.reduce((a, r) => a + Number(r.amount || 0), 0);
@@ -713,9 +713,10 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
   const minSeats = Math.max(seatsUsed, 1);
   const qty = Math.max(minSeats, Math.floor(seats) || 0);
   const reimbActive = reimbursementActive(billing);
-  // One unified quote: seat cost + (if the add-on is ticked or already active)
-  // the ₹5/emp/mo reimbursement add-on — paid through a single button.
-  const reimbWanted = reimbActive || reimbChecked;
+  const reimbEntitled = reimbursementEntitled(billing);
+  // Tick state: an entitled org (free tier, or already paid) toggles reimbursement
+  // on/off instantly; a non-entitled paid org stages the add-on into the payment.
+  const reimbWanted = reimbEntitled ? reimbActive : reimbChecked;
   const quote = quoteFor(billing, qty, reimbWanted);
   const seatPortion = quote.amount - quote.addonAmount;
   const periodEndText = billing.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—';
@@ -739,6 +740,14 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
     setReqMgr(val);
     try { await updateOrganization(billing.id, { reimbursement_require_manager: val }); onRefresh(); }
     catch { setReqMgr(!val); onToast('Could not update setting', 'red', 'xCircle'); }
+  };
+  // Turn the reimbursement add-on on/off (entitled orgs only — no payment).
+  const toggleReimbOn = async (on: boolean) => {
+    try {
+      await updateOrganization(billing.id, { reimbursement_disabled: !on });
+      onToast(on ? 'Reimbursement turned on' : 'Reimbursement turned off — all its features are now hidden', on ? 'green' : 'amber', 'receipt');
+      onRefresh();
+    } catch { onToast('Could not update setting', 'red', 'xCircle'); }
   };
 
   return (
@@ -796,9 +805,9 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
               <div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 600, marginBottom: 5 }}>Employees / seats</div>
               <input type="number" min={minSeats} value={seats || qty} onChange={(e) => setSeats(Number(e.target.value))} style={seatInput} aria-label="Number of seats" />
             </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 9, height: 42, padding: '0 14px', borderRadius: 11, border: `1px solid ${reimbWanted ? 'var(--accent)' : 'var(--line)'}`, background: reimbWanted ? 'var(--accent-soft)' : 'var(--panel)', cursor: reimbActive ? 'default' : 'pointer' }}>
-              <input type="checkbox" checked={reimbWanted} disabled={reimbActive} onChange={(e) => setReimbChecked(e.target.checked)} style={{ width: 17, height: 17, accentColor: 'var(--accent)', cursor: reimbActive ? 'default' : 'pointer' }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>Reimbursement add-on {reimbActive ? (paid ? '(active)' : '(free on your plan)') : `· ₹${REIMBURSEMENT_RATE}/emp/mo`}</span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 9, height: 42, padding: '0 14px', borderRadius: 11, border: `1px solid ${reimbWanted ? 'var(--accent)' : 'var(--line)'}`, background: reimbWanted ? 'var(--accent-soft)' : 'var(--panel)', cursor: canManage ? 'pointer' : 'default' }}>
+              <input type="checkbox" checked={reimbWanted} disabled={!canManage} onChange={(e) => { const v = e.target.checked; if (reimbEntitled) void toggleReimbOn(v); else setReimbChecked(v); }} style={{ width: 17, height: 17, accentColor: 'var(--accent)', cursor: canManage ? 'pointer' : 'default' }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>Reimbursement add-on {reimbEntitled ? (reimbActive ? '— on' : '— off') : `· ₹${REIMBURSEMENT_RATE}/emp/mo`}</span>
             </label>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 16, flexWrap: 'wrap' }}>
@@ -829,7 +838,9 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Reimbursement add-on</div>
             <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Expense claims with receipts, approvals & payouts · {paid ? `₹${REIMBURSEMENT_RATE} / employee / month` : `free on the ${FREE_SEAT_LIMIT}-employee plan`}</div>
           </div>
-          {reimbActive && <APill tone="green"><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />{paid ? 'Active' : 'Included'}</APill>}
+          {reimbActive
+            ? <APill tone="green"><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />{paid ? 'Active' : 'Included'}</APill>
+            : reimbEntitled ? <APill tone="neutral">Off</APill> : null}
         </div>
         {reimbActive ? (
           <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
@@ -843,7 +854,9 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
           </div>
         ) : (
           <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid var(--line)', fontSize: 12.5, color: 'var(--ink-3)' }}>
-            {canManage ? 'Tick “Reimbursement add-on” in the box above and pay to switch it on.' : 'Ask an owner or HR admin to enable this add-on.'}
+            {!canManage ? 'Ask an owner or HR admin to enable this add-on.'
+              : reimbEntitled ? 'Turned off — all reimbursement features are hidden. Tick “Reimbursement add-on” in the box above to turn it back on (no charge).'
+              : 'Tick “Reimbursement add-on” in the box above and pay to switch it on.'}
           </div>
         )}
       </ACard>

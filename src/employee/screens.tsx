@@ -225,7 +225,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
         </Card>
       )}
 
-      {(ctx.reimbursementEnabled || ctx.reimbursements.length > 0) && (() => {
+      {ctx.reimbursementEnabled && (() => {
         const mine = ctx.reimbursements;
         const inr = (n: number) => '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n);
         const sum = (st: string) => mine.filter((r) => r.status === st).reduce((a, r) => a + Number(r.amount || 0), 0);

@@ -53,6 +53,7 @@ export type OrgBilling = {
   current_period_end: string | null;
   reimbursement_enabled: boolean;
   reimbursement_require_manager: boolean;
+  reimbursement_disabled: boolean;
 };
 
 /** The org's 1-year period is still open (free or paid). */
@@ -95,12 +96,20 @@ export function atSeatLimit(b: Pick<OrgBilling, 'subscription_status' | 'current
 }
 
 /**
- * Whether reimbursement is usable. Free-tier orgs (≤5 employees / not on a paid
- * seat plan) get it **free**; paid orgs (>5 seats) need the ₹5/emp/mo add-on.
+ * Whether the org is *entitled* to reimbursement — free-tier orgs (≤5 employees)
+ * always are; paid orgs (>5) must have bought the add-on within the period.
+ * Ignores the admin on/off preference.
  */
-export function reimbursementActive(b: Pick<OrgBilling, 'reimbursement_enabled' | 'current_period_end' | 'subscription_status' | 'seats'>): boolean {
+export function reimbursementEntitled(b: Pick<OrgBilling, 'reimbursement_enabled' | 'current_period_end' | 'subscription_status' | 'seats'>): boolean {
   if (!isPaid(b)) return true;                          // ≤5 free tier — included free
   return !!b.reimbursement_enabled && periodValid(b);   // >5 — requires the add-on
+}
+/**
+ * Whether reimbursement is actually usable: entitled AND the admin hasn't turned
+ * it off. When false, every reimbursement feature is hidden across both apps.
+ */
+export function reimbursementActive(b: Pick<OrgBilling, 'reimbursement_enabled' | 'current_period_end' | 'subscription_status' | 'seats' | 'reimbursement_disabled'>): boolean {
+  return !b.reimbursement_disabled && reimbursementEntitled(b);
 }
 
 export type Quote = { amount: number; addonAmount: number; prorated: boolean; renewal: boolean; periodEnd: Date; annualAtRenewal: number };
@@ -121,7 +130,7 @@ export function quoteFor(
   // "Already paid the add-on" is the paid flag — NOT free-tier inclusion, so an
   // org growing past 5 still gets charged the add-on if it wants it.
   const alreadyReimb = !!b.reimbursement_enabled && valid;
-  const wantReimb = reimbursement ?? reimbursementActive(b);
+  const wantReimb = reimbursement ?? reimbursementEntitled(b);
   // The add-on is free at ≤5 seats; only >5 is charged ₹5×seats×12.
   const addonRate = newSeats > FREE_SEAT_LIMIT ? addonAnnual(newSeats) : 0;
 
@@ -149,20 +158,25 @@ export async function fetchBilling(orgId: string): Promise<OrgBilling | null> {
   if (!isSupabaseConfigured) {
     // Demo mode: a free org with a fresh 1-year period so Billing renders.
     const periodEnd = new Date(Date.now() + YEAR_MS).toISOString();
-    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd, reimbursement_enabled: false, reimbursement_require_manager: true };
+    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd, reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false };
   }
   const full = await db().from('organizations')
-    .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager')
+    .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager,reimbursement_disabled')
     .eq('id', orgId).single();
   if (!full.error) return (full.data as OrgBilling) ?? null;
 
-  // Reimbursement columns land in migration 0006 — until it's run, fall back to
-  // the base billing columns so the Billing page keeps working.
+  // reimbursement_disabled lands in 0010; reimbursement_enabled/require_manager in
+  // 0006. Fall back progressively so the page keeps working mid-migration.
+  const mid = await db().from('organizations')
+    .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager')
+    .eq('id', orgId).single();
+  if (!mid.error) return mid.data ? { ...(mid.data as Omit<OrgBilling, 'reimbursement_disabled'>), reimbursement_disabled: false } : null;
+
   const base = await db().from('organizations')
     .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end')
     .eq('id', orgId).single();
   if (base.error) throw base.error;
-  return base.data ? { ...(base.data as Omit<OrgBilling, 'reimbursement_enabled' | 'reimbursement_require_manager'>), reimbursement_enabled: false, reimbursement_require_manager: true } : null;
+  return base.data ? { ...(base.data as Omit<OrgBilling, 'reimbursement_enabled' | 'reimbursement_require_manager' | 'reimbursement_disabled'>), reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false } : null;
 }
 
 export type PaymentRow = { id: string; amount_inr: number; seats: number; period_end: string; created_at: string };
