@@ -104,9 +104,9 @@ returns trigger language plpgsql security definer set search_path = public as $$
 begin
   if NEW.status is distinct from OLD.status and NEW.profile_id is not null then
     insert into notifications (org_id, user_id, type, title, body)
-    values (NEW.org_id, NEW.profile_id, 'reimbursement_' || lower(NEW.status),
-            'Reimbursement ' || NEW.status,
-            'Your ' || NEW.category || ' claim of ' || to_char(NEW.amount, 'FM999999990.00') || ' was ' || lower(NEW.status) ||
+    values (NEW.org_id, NEW.profile_id, 'reimbursement_' || lower(NEW.status::text),
+            'Reimbursement ' || NEW.status::text,
+            'Your ' || NEW.category || ' claim of ' || to_char(NEW.amount, 'FM999999990.00') || ' was ' || lower(NEW.status::text) ||
             case when NEW.status = 'Paid' and NEW.paid_ref is not null then ' (ref ' || NEW.paid_ref || ')' else '' end || '.');
   -- Manager forwarded it to HR → let HR know there's something to action.
   elsif NEW.stage = 'hr' and OLD.stage = 'manager' then

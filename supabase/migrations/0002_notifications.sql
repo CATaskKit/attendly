@@ -27,9 +27,9 @@ returns trigger language plpgsql security definer set search_path = public as $$
 begin
   if NEW.status is distinct from OLD.status and NEW.requested_by is not null then
     insert into notifications (org_id, user_id, type, title, body)
-    values (NEW.org_id, NEW.requested_by, 'leave_' || lower(NEW.status),
-            'Leave ' || NEW.status,
-            'Your ' || NEW.type || ' leave was ' || lower(NEW.status) || '.');
+    values (NEW.org_id, NEW.requested_by, 'leave_' || lower(NEW.status::text),
+            'Leave ' || NEW.status::text,
+            'Your ' || NEW.type || ' leave was ' || lower(NEW.status::text) || '.');
   end if;
   return NEW;
 end $$;
