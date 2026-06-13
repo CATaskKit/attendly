@@ -217,7 +217,7 @@ export default function AdminApp() {
             ) : page === 'holidays' ? (
               <Holidays holidays={shownHolidays} canManage={canManage} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
             ) : (
-              <Dashboard stats={stats} leave={shownLeave} reimbursements={reimbursements} reimbEnabled={!!billing && reimbursementActive(billing)} onGo={setPage} onDecide={onDecide} />
+              <Dashboard stats={stats} leave={shownLeave} reimbursements={reimbursements} reimbEnabled={!!billing && reimbursementActive(billing)} announcements={announcements} announcementReads={announcementReads} memberCount={employees.length} canManage={canManage} onGo={setPage} onDecide={onDecide} />
             )}
         </main>
       </div>
@@ -253,13 +253,15 @@ function EmptyManager() {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────
-function Dashboard({ stats, leave, reimbursements, reimbEnabled, onGo, onDecide }: { stats: Stats | null; leave: LeaveRow[]; reimbursements: Reimbursement[]; reimbEnabled: boolean; onGo: (p: Page) => void; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
+function Dashboard({ stats, leave, reimbursements, reimbEnabled, announcements, announcementReads, memberCount, canManage, onGo, onDecide }: { stats: Stats | null; leave: LeaveRow[]; reimbursements: Reimbursement[]; reimbEnabled: boolean; announcements: Announcement[]; announcementReads: AnnouncementRead[]; memberCount: number; canManage: boolean; onGo: (p: Page) => void; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
   const pending = leave.filter((l) => l.status === 'Pending');
   const showReimb = reimbEnabled || reimbursements.length > 0;
   const reimbPending = reimbursements.filter((r) => r.status === 'Pending');
   const reimbApproved = reimbursements.filter((r) => r.status === 'Approved');
   const awaitingPayout = reimbApproved.reduce((a, r) => a + Number(r.amount || 0), 0);
   const paidTotal = reimbursements.filter((r) => r.status === 'Paid').reduce((a, r) => a + Number(r.amount || 0), 0);
+  const annReadCount = (id: string) => new Set(announcementReads.filter((r) => r.announcement_id === id).map((r) => r.user_id)).size;
+  const annDenom = Math.max(0, memberCount - 1);
   return (
     <div>
       <PageHead title="Dashboard" sub={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} />
@@ -301,6 +303,34 @@ function Dashboard({ stats, leave, reimbursements, reimbEnabled, onGo, onDecide 
                 <button onClick={() => onGo('reimbursements')} style={{ marginLeft: 'auto', border: 'none', background: 'var(--accent-soft)', color: 'var(--accent-deep)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: '6px 12px', borderRadius: 8 }}>Process payouts</button>
               </div>
             )}
+          </ACard>
+        </div>
+      )}
+
+      {(announcements.length > 0 || canManage) && (
+        <div style={{ marginTop: 16 }}>
+          <ACard pad={0} style={{ overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <AIcon name="bell" size={18} color="var(--accent)" />
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>Announcements</div>
+              </div>
+              <button onClick={() => onGo('announcements')} style={{ border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}>{canManage ? 'Post' : 'View all'} <AIcon name="chevronRight" size={15} color="var(--accent)" /></button>
+            </div>
+            {announcements.length === 0 ? (
+              <div style={{ padding: '8px 22px 22px', color: 'var(--ink-3)', fontSize: 13.5 }}>No announcements yet — share a company-wide update with your team.</div>
+            ) : announcements.slice(0, 3).map((a) => (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 22px', borderTop: '1px solid var(--line)' }}>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <AIcon name={a.pinned ? 'arrowUp' : 'bell'} size={16} color="var(--accent)" />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{a.author || 'Admin'} · {new Date(a.created_at).toLocaleDateString()}</div>
+                </div>
+                {annDenom > 0 && <APill tone="neutral"><AIcon name="checkCircle" size={12} color="var(--ink-2)" />{annReadCount(a.id)} / {annDenom} read</APill>}
+              </div>
+            ))}
           </ACard>
         </div>
       )}
