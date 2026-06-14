@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { formatAppDate } from './networkTime';
+import { COMP_OFF_TYPE, countExtraDays } from './compoff';
 
 export type Employee = {
   id: string; code: string; name: string; dept: string | null; designation: string | null;
@@ -275,7 +276,7 @@ export async function decideLeave(row: LeaveRow, action: 'approve' | 'reject'): 
   const { error } = await db().from('leave_requests').update(patch).eq('id', row.id);
   if (error) throw error;
 
-  if (row.employee_id && row.org_id) {
+  if (row.employee_id && row.org_id && !sameText(row.type, COMP_OFF_TYPE)) {
     if (action === 'reject') await adjustLeaveBalance(row.org_id, row.employee_id, row.type, { pending: -num(row.days) });
     if (action === 'approve' && row.stage !== 'manager') await adjustLeaveBalance(row.org_id, row.employee_id, row.type, { pending: -num(row.days), used: num(row.days) });
   }
@@ -484,7 +485,10 @@ export async function applyLeave(orgId: string, p: {
   reason: string;
   attachment?: string | null;
 }): Promise<void> {
-  if (p.employee?.id) {
+  // Comp off draws from earned extra-work days (derived), not a leave_balances
+  // row — skip the RPC/quota path and insert directly (client validates balance).
+  const isCompOff = sameText(p.type, COMP_OFF_TYPE);
+  if (p.employee?.id && !isCompOff) {
     const rpc = await db().rpc('apply_leave_request', {
       p_type: p.type,
       p_from_date: p.fromDate,
@@ -522,7 +526,16 @@ export async function applyLeave(orgId: string, p: {
     stage: 'manager',
   });
   if (error) throw error;
-  if (p.employee?.id) await adjustLeaveBalance(orgId, p.employee.id, p.type, { pending: p.days });
+  if (p.employee?.id && !isCompOff) await adjustLeaveBalance(orgId, p.employee.id, p.type, { pending: p.days });
+}
+
+// Comp-off credits earned = distinct attendance days on a weekend/holiday
+// (all-time). Lightweight: fetches only the `day` column.
+export async function compOffEarned(employee: Employee | null, holidayDates: string[]): Promise<number> {
+  if (!employee?.id) return 0;
+  const { data, error } = await db().from('attendance').select('day').eq('employee_id', employee.id);
+  if (error) throw error;
+  return countExtraDays((data ?? []).map((r) => r.day as string), new Set(holidayDates));
 }
 
 export async function myLeave(profile: ProfileLookup, employee: Employee | null): Promise<LeaveRow[]> {

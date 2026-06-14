@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { AIcon, AAvatar, ACard, APill, ABadge, PageHead, BtnGhost, BtnPrimary, Spinner } from './ui';
 import { supabase } from '../lib/supabase';
-import type { Employee, LeaveRow } from '../lib/api';
+import type { Employee, LeaveRow, Holiday } from '../lib/api';
+import { countExtraDays } from '../lib/compoff';
 
 // Restored from the original design handoff (admin-screens2.jsx). Both screens
 // are computed from live data: real employees + this month's attendance rows +
@@ -82,7 +83,7 @@ function leaveDaysByCode(leave: LeaveRow[]): Record<string, number> {
 }
 
 // ── ATTENDANCE MIS ───────────────────────────────────────────────────
-export function AttendanceMIS({ orgId, employees, leave }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[] }) {
+export function AttendanceMIS({ orgId, employees, leave, holidays }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[] }) {
   const { rows, loading } = useMonthAttendance(orgId);
   const active = employees.filter((e) => e.status === 'Active');
 
@@ -91,6 +92,7 @@ export function AttendanceMIS({ orgId, employees, leave }: { orgId: string | nul
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const weekdaysElapsed = countWeekdays(now.getFullYear(), now.getMonth(), 1, Math.min(today, lastDay));
   const leaveByCode = useMemo(() => leaveDaysByCode(leave), [leave]);
+  const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
 
   const data = active.map((e) => {
     const mine = rows.filter((r) => r.employee_id === e.id);
@@ -103,10 +105,12 @@ export function AttendanceMIS({ orgId, employees, leave }: { orgId: string | nul
       return mins > 9 * 60 + 35; // after 09:35 (09:30 shift + grace)
     }).length;
     const lv = leaveByCode[e.code] ?? 0;
-    const absent = Math.max(0, weekdaysElapsed - present - lv);
-    return { e, present, leave: lv, absent, late, hrs };
+    const extra = countExtraDays(mine.map((r) => r.day), holidaySet); // weekend/holiday work → comp-off
+    // Extra (weekend/holiday) days don't offset weekday absence.
+    const absent = Math.max(0, weekdaysElapsed - Math.max(0, present - extra) - lv);
+    return { e, present, leave: lv, absent, late, extra, hrs };
   });
-  const sum = (k: 'present' | 'leave' | 'absent' | 'late') => data.reduce((a, r) => a + r[k], 0);
+  const sum = (k: 'present' | 'leave' | 'absent' | 'late' | 'extra') => data.reduce((a, r) => a + r[k], 0);
   const fmtHrs = (h: number) => `${Math.floor(h)}h ${String(Math.round((h % 1) * 60)).padStart(2, '0')}m`;
 
   return (
@@ -122,8 +126,8 @@ export function AttendanceMIS({ orgId, employees, leave }: { orgId: string | nul
             ))}
           </div>
           <TableShell
-            head={['Employee', 'Department', { t: 'Present', r: true }, { t: 'Leave', r: true }, { t: 'Absent', r: true }, { t: 'Late', r: true }, { t: 'Working hrs', r: true }]}
-            foot={<tr><td style={{ ...td, fontWeight: 800, color: 'var(--ink-1)', borderBottom: 'none' }} colSpan={2}>Total · {data.length} employees</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('present')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('leave')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('absent')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('late')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td></tr>}>
+            head={['Employee', 'Department', { t: 'Present', r: true }, { t: 'Leave', r: true }, { t: 'Absent', r: true }, { t: 'Late', r: true }, { t: 'Extra', r: true }, { t: 'Working hrs', r: true }]}
+            foot={<tr><td style={{ ...td, fontWeight: 800, color: 'var(--ink-1)', borderBottom: 'none' }} colSpan={2}>Total · {data.length} employees</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('present')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('leave')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('absent')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('late')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('extra')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td></tr>}>
             {data.map((r) => (
               <tr key={r.e.id}>
                 <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><AAvatar name={r.e.name} size={32} /><div><div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-1)' }}>{r.e.name}</div><div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{r.e.code}</div></div></div></td>
@@ -132,6 +136,7 @@ export function AttendanceMIS({ orgId, employees, leave }: { orgId: string | nul
                 <td style={tdNum}>{r.leave}</td>
                 <td style={{ ...tdNum, color: r.absent ? 'var(--red)' : 'var(--ink-3)' }}>{r.absent}</td>
                 <td style={tdNum}>{r.late}</td>
+                <td style={{ ...tdNum, color: r.extra ? 'var(--green)' : 'var(--ink-3)' }}>{r.extra}</td>
                 <td style={tdNum}>{fmtHrs(r.hrs)}</td>
               </tr>
             ))}
@@ -145,7 +150,7 @@ export function AttendanceMIS({ orgId, employees, leave }: { orgId: string | nul
 // ── PAYROLL MIS ──────────────────────────────────────────────────────
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 
-export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void }) {
+export function PayrollMIS({ orgId, employees, leave, holidays, canManage, onToast }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[]; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void }) {
   const { rows, loading } = useMonthAttendance(orgId);
   const active = employees.filter((e) => e.status === 'Active');
   const now = new Date();
@@ -155,6 +160,8 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
   // must not be deducted mid-month.
   const elapsed = countWeekdays(now.getFullYear(), now.getMonth(), 1, Math.min(now.getDate(), lastDay));
   const leaveByCode = useMemo(() => leaveDaysByCode(leave), [leave]);
+  const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
+  const [payExtra, setPayExtra] = useState(false); // pay extra (weekend/holiday) days as overtime
 
   // Basic salary per employee code — no backend column, so persisted locally.
   const storeKey = `attendly:payroll:${orgId ?? 'demo'}:salary`;
@@ -174,15 +181,20 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
     const lv = leaveByCode[e.code] ?? 0;
     const basic = salary[e.code] ?? 70000;
     const perDay = totalDays > 0 ? basic / totalDays : 0;
-    // Loss-of-pay = working days elapsed not covered by attendance or paid leave.
-    const lop = Math.max(0, elapsed - present - lv);
+    const extra = countExtraDays(mine.map((r) => r.day), holidaySet); // weekend/holiday work → comp-off, not regular attendance
+    // Loss-of-pay = working days elapsed not covered by WEEKDAY attendance or paid leave.
+    const lop = Math.max(0, elapsed - Math.max(0, present - extra) - lv);
     const paid = Math.max(0, totalDays - lop);
-    const payable = Math.max(0, basic - perDay * lop);
-    return { e, basic, paid, lop, leave: lv, payable };
+    const deduction = perDay * lop;
+    const overtime = payExtra ? perDay * extra : 0;
+    const payable = Math.max(0, basic - deduction) + overtime;
+    return { e, basic, paid, lop, extra, overtime, deduction, leave: lv, payable };
   });
   const totalPayable = data.reduce((a, r) => a + r.payable, 0);
   const totalBasic = data.reduce((a, r) => a + r.basic, 0);
-  const deductions = totalBasic - totalPayable;
+  const deductions = data.reduce((a, r) => a + r.deduction, 0);
+  const totalOvertime = data.reduce((a, r) => a + r.overtime, 0);
+  const totalExtra = data.reduce((a, r) => a + r.extra, 0);
 
   const doProcess = () => { setProcessed(true); onToast(`Salary processed · ${inr(totalPayable)} queued for ${data.length} employees`); };
 
@@ -201,7 +213,7 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: processed ? 'var(--green)' : 'var(--accent-deep)' }}>{processed ? 'Amount processed' : 'Amount to process'}</span>
               </div>
               <div style={{ fontSize: 34, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.03em', marginTop: 8, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{inr(totalPayable)}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600, marginTop: 7 }}>Net of {inr(deductions)} leave-without-pay deductions</div>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600, marginTop: 7 }}>Net of {inr(deductions)} LOP{totalOvertime > 0 ? ` · incl. ${inr(totalOvertime)} overtime` : ''}</div>
             </ACard>
             <ACard pad={20}>
               <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 700 }}>Employees</div>
@@ -223,9 +235,19 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
             </span>
           </div>
 
+          {(totalExtra > 0 || payExtra) && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '11px 16px', borderRadius: 12, background: payExtra ? 'var(--green-soft)' : 'var(--soft)', border: '1px solid var(--line)', cursor: canManage ? 'pointer' : 'default' }}>
+              <input type="checkbox" checked={payExtra} disabled={!canManage} onChange={(e) => setPayExtra(e.target.checked)} style={{ width: 17, height: 17, accentColor: 'var(--green)' }} />
+              <span style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 600 }}>
+                Pay {totalExtra} extra day{totalExtra === 1 ? '' : 's'} (weekend/holiday work) as overtime
+                {payExtra ? ` · +${inr(totalOvertime)} added` : ' · otherwise they bank as comp-off for the employee'}
+              </span>
+            </label>
+          )}
+
           <TableShell
-            head={['Employee', { t: 'Basic salary', r: true }, { t: 'Working days', r: true }, { t: 'Paid days', r: true }, { t: 'LOP days', r: true }, { t: 'Salary payable', r: true }]}
-            foot={<tr><td style={{ ...td, fontWeight: 800, color: 'var(--ink-1)', borderBottom: 'none' }}>Total payable · {data.length}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{inr(totalBasic)}</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none', fontSize: 15, fontWeight: 800, color: 'var(--green)' }}>{inr(totalPayable)}</td></tr>}>
+            head={['Employee', { t: 'Basic salary', r: true }, { t: 'Working days', r: true }, { t: 'Paid days', r: true }, { t: 'LOP days', r: true }, { t: 'Extra days', r: true }, { t: 'Salary payable', r: true }]}
+            foot={<tr><td style={{ ...td, fontWeight: 800, color: 'var(--ink-1)', borderBottom: 'none' }}>Total payable · {data.length}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{inr(totalBasic)}</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>{totalExtra}</td><td style={{ ...tdNum, borderBottom: 'none', fontSize: 15, fontWeight: 800, color: 'var(--green)' }}>{inr(totalPayable)}</td></tr>}>
             {data.map((r) => (
               <tr key={r.e.id}>
                 <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><AAvatar name={r.e.name} size={32} /><div><div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-1)' }}>{r.e.name}</div><div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{r.e.dept || '—'}</div></div></div></td>
@@ -236,6 +258,7 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
                 <td style={tdNum}>{totalDays}</td>
                 <td style={tdNum}>{r.paid}</td>
                 <td style={{ ...tdNum, color: r.lop ? 'var(--red)' : 'var(--ink-3)' }}>{r.lop}</td>
+                <td style={{ ...tdNum, color: r.extra ? 'var(--green)' : 'var(--ink-3)' }}>{r.extra}{r.overtime > 0 ? ` · ${inr(r.overtime)}` : ''}</td>
                 <td style={{ ...tdNum, fontWeight: 800, color: 'var(--ink-1)' }}>{inr(r.payable)}</td>
               </tr>
             ))}

@@ -200,9 +200,9 @@ export default function AdminApp() {
             ) : page === 'settings' ? (
               <Settings orgId={orgId} canManage={canManage} onToast={fire} onGoBilling={() => setPage('billing')} />
             ) : page === 'attendance' ? (
-              <AttendanceMIS orgId={orgId} employees={employees} leave={leave} />
+              <AttendanceMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} />
             ) : page === 'payroll' ? (
-              <PayrollMIS orgId={orgId} employees={employees} leave={leave} canManage={canManage} onToast={fire} />
+              <PayrollMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} canManage={canManage} onToast={fire} />
             ) : page === 'reimbursements' ? (
               <Reimbursements rows={reimbursements} role={role} billing={billing} onChanged={() => { void reload(); }} onToast={fire} onGoBilling={() => setPage('billing')} />
             ) : page === 'announcements' ? (

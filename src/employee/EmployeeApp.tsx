@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth';
 import {
   applyLeave, checkIn, checkOut, decideTeamLeave, ensureMyEmployee, getTodayAttendance,
   listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
-  applyReimbursement, myReimbursements,
+  applyReimbursement, myReimbursements, compOffEarned,
   listAnnouncements, listAnnouncementReads, markAnnouncementRead,
   type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow, type Reimbursement, type Announcement,
 } from '../lib/api';
@@ -220,7 +220,14 @@ export default function EmployeeApp() {
       ]);
       setLeaveRequests(leaveRows.map(mapLeave));
       setAttendanceRows(attRows);
-      setLeaveBalances(balances);
+      // Comp-off balance = earned extra-work days (weekend/holiday attendance,
+      // all-time) − Comp off leave used/pending. Surfaced as a leave balance.
+      const earnedComp = await compOffEarned(emp, holidayRows.map((h) => h.date)).catch(() => 0);
+      const compUsed = leaveRows.filter((l) => l.type?.toLowerCase() === 'comp off' && l.status === 'Approved').reduce((a, l) => a + Number(l.days || 0), 0);
+      const compPending = leaveRows.filter((l) => l.type?.toLowerCase() === 'comp off' && l.status === 'Pending').reduce((a, l) => a + Number(l.days || 0), 0);
+      setLeaveBalances(earnedComp > 0 || compUsed > 0 || compPending > 0
+        ? [...balances, { type: 'Comp off', allotted: earnedComp, used: compUsed, pending: compPending, available: Math.max(0, earnedComp - compUsed - compPending) }]
+        : balances);
       setHolidays(holidayRows);
       setTeamRows(approvals);
       setTeamRequests(approvals.map(mapTeamLeave));
