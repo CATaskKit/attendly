@@ -91,27 +91,36 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
   const [cfg, setCfg] = useState({ name: '', industry: 'Software / IT', country: 'India', tz: 'Asia/Kolkata', currency: 'INR' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [week, setWeek] = useLocalSetting<string[]>(orgId, 'workingDays', ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+  const [offDays, setOffDays] = useState<number[]>([0]);          // weekly off days among Sun–Fri (Sat is the rule below)
+  const [satRule, setSatRule] = useState<'off' | 'even' | 'odd' | 'work'>('off');
   const [shift, setShift] = useLocalSetting(orgId, 'shift', { start: '09:30', end: '18:30' });
   const upd = (k: keyof typeof cfg, v: string) => setCfg((c) => ({ ...c, [k]: v }));
 
   useEffect(() => {
     if (!orgId) { setLoading(false); return; }
     getOrganization(orgId).then((o) => {
-      if (o) setCfg({ name: o.display_name || o.name, industry: o.industry || 'Software / IT', country: o.country || 'India', tz: o.timezone || 'Asia/Kolkata', currency: o.currency || 'INR' });
+      if (!o) return;
+      setCfg({ name: o.display_name || o.name, industry: o.industry || 'Software / IT', country: o.country || 'India', tz: o.timezone || 'Asia/Kolkata', currency: o.currency || 'INR' });
+      const wd = Array.isArray(o.weekend_days) ? o.weekend_days : [0, 6];
+      setOffDays(wd.filter((d) => d !== 6));
+      setSatRule(o.weekend_sat_alt === 'even' ? 'even' : o.weekend_sat_alt === 'odd' ? 'odd' : wd.includes(6) ? 'off' : 'work');
     }).catch(console.error).finally(() => setLoading(false));
   }, [orgId]);
 
   const save = async () => {
+    const weekend_days = [...offDays, ...(satRule === 'off' ? [6] : [])].sort((a, b) => a - b);
+    const weekend_sat_alt = satRule === 'even' ? 'even' : satRule === 'odd' ? 'odd' : null;
     if (!orgId) { notify('Company profile saved'); return; }
     setSaving(true);
     try {
-      await updateOrganization(orgId, { display_name: cfg.name, industry: cfg.industry, country: cfg.country, timezone: cfg.tz, currency: cfg.currency });
+      await updateOrganization(orgId, { display_name: cfg.name, industry: cfg.industry, country: cfg.country, timezone: cfg.tz, currency: cfg.currency, weekend_days, weekend_sat_alt });
       notify('Company profile saved');
     } catch (e) { console.error(e); notify('Could not save profile', 'red', 'xCircle'); }
     finally { setSaving(false); }
   };
-  const toggleDay = (d: string) => setWeek(week.includes(d) ? week.filter((x) => x !== d) : [...week, d]);
+  const toggleDay = (n: number) => setOffDays(offDays.includes(n) ? offDays.filter((x) => x !== n) : [...offDays, n]);
+  const SAT_OPTS: Record<string, 'off' | 'even' | 'odd' | 'work'> = { 'Off every week': 'off', '2nd & 4th off': 'even', '1st & 3rd off': 'odd', 'Working': 'work' };
+  const satLabel = Object.keys(SAT_OPTS).find((k) => SAT_OPTS[k] === satRule) ?? 'Off every week';
 
   if (loading) return <Spinner label="Loading company profile…" />;
   return (
@@ -125,13 +134,16 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
       <SettingItem label="Timezone" desc="Used for attendance timestamps and reports.">
         <div style={{ width: 240 }}><SSelect value={cfg.tz} onChange={(v) => upd('tz', v)} options={['Asia/Kolkata', 'Asia/Dubai', 'Europe/London', 'America/New_York', 'Asia/Singapore']} /></div>
       </SettingItem>
-      <SettingItem label="Working days" desc="Days counted toward attendance and payroll.">
+      <SettingItem label="Weekly off days" desc="Highlighted days are non-working — they're excluded from payroll working days, and attendance on them earns comp-off.">
         <div style={{ display: 'flex', gap: 6 }}>
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => {
-            const on = week.includes(d);
-            return <button key={d} onClick={() => toggleDay(d)} style={{ width: 42, height: 38, borderRadius: 9, border: on ? '1.5px solid var(--accent)' : '1.5px solid var(--line)', background: on ? 'var(--accent-soft)' : 'var(--panel)', color: on ? 'var(--accent-deep)' : 'var(--ink-3)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>{d}</button>;
+          {[{ n: 0, l: 'Sun' }, { n: 1, l: 'Mon' }, { n: 2, l: 'Tue' }, { n: 3, l: 'Wed' }, { n: 4, l: 'Thu' }, { n: 5, l: 'Fri' }].map((d) => {
+            const on = offDays.includes(d.n);
+            return <button key={d.n} onClick={() => canManage && toggleDay(d.n)} disabled={!canManage} style={{ width: 42, height: 38, borderRadius: 9, border: on ? '1.5px solid var(--accent)' : '1.5px solid var(--line)', background: on ? 'var(--accent-soft)' : 'var(--panel)', color: on ? 'var(--accent-deep)' : 'var(--ink-3)', fontWeight: 700, fontSize: 12.5, cursor: canManage ? 'pointer' : 'default' }}>{d.l}</button>;
           })}
         </div>
+      </SettingItem>
+      <SettingItem label="Saturdays" desc="Set a fixed or alternate-Saturday week-off policy.">
+        <div style={{ width: 200 }}><SSelect value={satLabel} onChange={(v) => canManage && setSatRule(SAT_OPTS[v])} options={Object.keys(SAT_OPTS)} /></div>
       </SettingItem>
       <SettingItem label="Standard shift" desc="Default office hours for new employees." last>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

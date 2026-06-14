@@ -54,6 +54,8 @@ export type OrgBilling = {
   reimbursement_enabled: boolean;
   reimbursement_require_manager: boolean;
   reimbursement_disabled: boolean;
+  weekend_days: number[] | null;
+  weekend_sat_alt: string | null;
 };
 
 /** The org's 1-year period is still open (free or paid). */
@@ -158,10 +160,10 @@ export async function fetchBilling(orgId: string): Promise<OrgBilling | null> {
   if (!isSupabaseConfigured) {
     // Demo mode: a free org with a fresh 1-year period so Billing renders.
     const periodEnd = new Date(Date.now() + YEAR_MS).toISOString();
-    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd, reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false };
+    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd, reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null };
   }
   const full = await db().from('organizations')
-    .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager,reimbursement_disabled')
+    .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager,reimbursement_disabled,weekend_days,weekend_sat_alt')
     .eq('id', orgId).single();
   if (!full.error) return (full.data as OrgBilling) ?? null;
 
@@ -170,13 +172,13 @@ export async function fetchBilling(orgId: string): Promise<OrgBilling | null> {
   const mid = await db().from('organizations')
     .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager')
     .eq('id', orgId).single();
-  if (!mid.error) return mid.data ? { ...(mid.data as Omit<OrgBilling, 'reimbursement_disabled'>), reimbursement_disabled: false } : null;
+  if (!mid.error) return mid.data ? { ...(mid.data as Omit<OrgBilling, 'reimbursement_disabled' | 'weekend_days' | 'weekend_sat_alt'>), reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null } : null;
 
   const base = await db().from('organizations')
     .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end')
     .eq('id', orgId).single();
   if (base.error) throw base.error;
-  return base.data ? { ...(base.data as Omit<OrgBilling, 'reimbursement_enabled' | 'reimbursement_require_manager' | 'reimbursement_disabled'>), reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false } : null;
+  return base.data ? { ...(base.data as Omit<OrgBilling, 'reimbursement_enabled' | 'reimbursement_require_manager' | 'reimbursement_disabled' | 'weekend_days' | 'weekend_sat_alt'>), reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null } : null;
 }
 
 export type PaymentRow = { id: string; amount_inr: number; seats: number; period_end: string; created_at: string };

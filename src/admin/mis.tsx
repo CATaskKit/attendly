@@ -3,6 +3,7 @@ import { AIcon, AAvatar, ACard, APill, ABadge, PageHead, BtnGhost, BtnPrimary, S
 import { supabase } from '../lib/supabase';
 import type { Employee, LeaveRow, Holiday } from '../lib/api';
 import { countExtraDays } from '../lib/compoff';
+import { countWorkingDays, type WeekendConfig } from '../lib/calendar';
 
 // Restored from the original design handoff (admin-screens2.jsx). Both screens
 // are computed from live data: real employees + this month's attendance rows +
@@ -83,14 +84,14 @@ function leaveDaysByCode(leave: LeaveRow[]): Record<string, number> {
 }
 
 // ── ATTENDANCE MIS ───────────────────────────────────────────────────
-export function AttendanceMIS({ orgId, employees, leave, holidays }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[] }) {
+export function AttendanceMIS({ orgId, employees, leave, holidays, weekend }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[]; weekend: WeekendConfig }) {
   const { rows, loading } = useMonthAttendance(orgId);
   const active = employees.filter((e) => e.status === 'Active');
 
   const now = new Date();
   const today = now.getDate();
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const weekdaysElapsed = countWeekdays(now.getFullYear(), now.getMonth(), 1, Math.min(today, lastDay));
+  const weekdaysElapsed = countWorkingDays(now.getFullYear(), now.getMonth(), 1, Math.min(today, lastDay), weekend);
   const leaveByCode = useMemo(() => leaveDaysByCode(leave), [leave]);
   const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
 
@@ -105,7 +106,7 @@ export function AttendanceMIS({ orgId, employees, leave, holidays }: { orgId: st
       return mins > 9 * 60 + 35; // after 09:35 (09:30 shift + grace)
     }).length;
     const lv = leaveByCode[e.code] ?? 0;
-    const extra = countExtraDays(mine.map((r) => r.day), holidaySet); // weekend/holiday work → comp-off
+    const extra = countExtraDays(mine.map((r) => r.day), holidaySet, weekend); // weekend/holiday work → comp-off
     // Extra (weekend/holiday) days don't offset weekday absence.
     const absent = Math.max(0, weekdaysElapsed - Math.max(0, present - extra) - lv);
     return { e, present, leave: lv, absent, late, extra, hrs };
@@ -150,15 +151,15 @@ export function AttendanceMIS({ orgId, employees, leave, holidays }: { orgId: st
 // ── PAYROLL MIS ──────────────────────────────────────────────────────
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 
-export function PayrollMIS({ orgId, employees, leave, holidays, canManage, onToast }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[]; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void }) {
+export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canManage, onToast }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[]; weekend: WeekendConfig; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void }) {
   const { rows, loading } = useMonthAttendance(orgId);
   const active = employees.filter((e) => e.status === 'Active');
   const now = new Date();
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const totalDays = countWeekdays(now.getFullYear(), now.getMonth(), 1, lastDay);
-  // Working days elapsed so far — future weekdays aren't "absent" yet, so they
-  // must not be deducted mid-month.
-  const elapsed = countWeekdays(now.getFullYear(), now.getMonth(), 1, Math.min(now.getDate(), lastDay));
+  const totalDays = countWorkingDays(now.getFullYear(), now.getMonth(), 1, lastDay, weekend);
+  // Working days elapsed so far — future working days aren't "absent" yet, so
+  // they must not be deducted mid-month.
+  const elapsed = countWorkingDays(now.getFullYear(), now.getMonth(), 1, Math.min(now.getDate(), lastDay), weekend);
   const leaveByCode = useMemo(() => leaveDaysByCode(leave), [leave]);
   const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
   const [payExtra, setPayExtra] = useState(false); // pay extra (weekend/holiday) days as overtime
@@ -181,7 +182,7 @@ export function PayrollMIS({ orgId, employees, leave, holidays, canManage, onToa
     const lv = leaveByCode[e.code] ?? 0;
     const basic = salary[e.code] ?? 70000;
     const perDay = totalDays > 0 ? basic / totalDays : 0;
-    const extra = countExtraDays(mine.map((r) => r.day), holidaySet); // weekend/holiday work → comp-off, not regular attendance
+    const extra = countExtraDays(mine.map((r) => r.day), holidaySet, weekend); // weekend/holiday work → comp-off, not regular attendance
     // Loss-of-pay = working days elapsed not covered by WEEKDAY attendance or paid leave.
     const lop = Math.max(0, elapsed - Math.max(0, present - extra) - lv);
     const paid = Math.max(0, totalDays - lop);

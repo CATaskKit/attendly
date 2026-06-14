@@ -10,6 +10,7 @@ import {
 } from '../lib/api';
 import { onTablesChange } from '../lib/realtime';
 import { fetchBilling, reimbursementActive } from '../lib/billing';
+import { weekendConfigFrom } from '../lib/calendar';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
@@ -222,7 +223,7 @@ export default function EmployeeApp() {
       setAttendanceRows(attRows);
       // Comp-off balance = earned extra-work days (weekend/holiday attendance,
       // all-time) − Comp off leave used/pending. Surfaced as a leave balance.
-      const earnedComp = await compOffEarned(emp, holidayRows.map((h) => h.date)).catch(() => 0);
+      const earnedComp = await compOffEarned(emp, holidayRows.map((h) => h.date), weekendConfigFrom(billing)).catch(() => 0);
       const compUsed = leaveRows.filter((l) => l.type?.toLowerCase() === 'comp off' && l.status === 'Approved').reduce((a, l) => a + Number(l.days || 0), 0);
       const compPending = leaveRows.filter((l) => l.type?.toLowerCase() === 'comp off' && l.status === 'Pending').reduce((a, l) => a + Number(l.days || 0), 0);
       setLeaveBalances(earnedComp > 0 || compUsed > 0 || compPending > 0

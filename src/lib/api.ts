@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { formatAppDate } from './networkTime';
 import { COMP_OFF_TYPE, countExtraDays } from './compoff';
+import { DEFAULT_WEEKEND, type WeekendConfig } from './calendar';
 
 export type Employee = {
   id: string; code: string; name: string; dept: string | null; designation: string | null;
@@ -156,7 +157,7 @@ export async function listLeaveTypes(): Promise<LeaveType[]> {
 }
 
 // ── Organization + onboarding writes ──────────────────────────────────
-export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean; reimbursement_disabled?: boolean };
+export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean; reimbursement_disabled?: boolean; weekend_days?: number[] | null; weekend_sat_alt?: string | null };
 
 export async function getOrganization(orgId: string): Promise<OrgRow | null> {
   const { data, error } = await db().from('organizations').select('*').eq('id', orgId).single();
@@ -531,11 +532,11 @@ export async function applyLeave(orgId: string, p: {
 
 // Comp-off credits earned = distinct attendance days on a weekend/holiday
 // (all-time). Lightweight: fetches only the `day` column.
-export async function compOffEarned(employee: Employee | null, holidayDates: string[]): Promise<number> {
+export async function compOffEarned(employee: Employee | null, holidayDates: string[], cfg: WeekendConfig = DEFAULT_WEEKEND): Promise<number> {
   if (!employee?.id) return 0;
   const { data, error } = await db().from('attendance').select('day').eq('employee_id', employee.id);
   if (error) throw error;
-  return countExtraDays((data ?? []).map((r) => r.day as string), new Set(holidayDates));
+  return countExtraDays((data ?? []).map((r) => r.day as string), new Set(holidayDates), cfg);
 }
 
 export async function myLeave(profile: ProfileLookup, employee: Employee | null): Promise<LeaveRow[]> {

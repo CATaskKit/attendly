@@ -19,6 +19,7 @@ import Settings from './Settings';
 import { AttendanceMIS, PayrollMIS } from './mis';
 import { Reimbursements } from './reimbursements';
 import { Announcements } from './announcements';
+import { weekendConfigFrom } from '../lib/calendar';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -200,9 +201,9 @@ export default function AdminApp() {
             ) : page === 'settings' ? (
               <Settings orgId={orgId} canManage={canManage} onToast={fire} onGoBilling={() => setPage('billing')} />
             ) : page === 'attendance' ? (
-              <AttendanceMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} />
+              <AttendanceMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} weekend={weekendConfigFrom(billing)} />
             ) : page === 'payroll' ? (
-              <PayrollMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} canManage={canManage} onToast={fire} />
+              <PayrollMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} weekend={weekendConfigFrom(billing)} canManage={canManage} onToast={fire} />
             ) : page === 'reimbursements' ? (
               <Reimbursements rows={reimbursements} role={role} billing={billing} onChanged={() => { void reload(); }} onToast={fire} onGoBilling={() => setPage('billing')} />
             ) : page === 'announcements' ? (
