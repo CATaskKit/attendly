@@ -149,7 +149,11 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
   const { rows, loading } = useMonthAttendance(orgId);
   const active = employees.filter((e) => e.status === 'Active');
   const now = new Date();
-  const totalDays = countWeekdays(now.getFullYear(), now.getMonth(), 1, new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate());
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const totalDays = countWeekdays(now.getFullYear(), now.getMonth(), 1, lastDay);
+  // Working days elapsed so far — future weekdays aren't "absent" yet, so they
+  // must not be deducted mid-month.
+  const elapsed = countWeekdays(now.getFullYear(), now.getMonth(), 1, Math.min(now.getDate(), lastDay));
   const leaveByCode = useMemo(() => leaveDaysByCode(leave), [leave]);
 
   // Basic salary per employee code — no backend column, so persisted locally.
@@ -169,9 +173,12 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
     const present = new Set(mine.map((r) => r.day)).size;
     const lv = leaveByCode[e.code] ?? 0;
     const basic = salary[e.code] ?? 70000;
-    const paid = Math.min(totalDays, present + lv);
-    const payable = totalDays > 0 ? (basic / totalDays) * paid : 0;
-    return { e, basic, paid, leave: lv, payable };
+    const perDay = totalDays > 0 ? basic / totalDays : 0;
+    // Loss-of-pay = working days elapsed not covered by attendance or paid leave.
+    const lop = Math.max(0, elapsed - present - lv);
+    const paid = Math.max(0, totalDays - lop);
+    const payable = Math.max(0, basic - perDay * lop);
+    return { e, basic, paid, lop, leave: lv, payable };
   });
   const totalPayable = data.reduce((a, r) => a + r.payable, 0);
   const totalBasic = data.reduce((a, r) => a + r.basic, 0);
@@ -212,12 +219,12 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '12px 16px', borderRadius: 12, background: processed ? 'var(--green-soft)' : 'var(--soft)', border: '1px solid var(--line)' }}>
             <AIcon name={processed ? 'checkCircle' : 'shield'} size={18} color={processed ? 'var(--green)' : 'var(--ink-3)'} />
             <span style={{ fontSize: 13, color: processed ? 'var(--green)' : 'var(--ink-2)', fontWeight: 600 }}>
-              {processed ? `Salary processed for ${data.length} employees. Payslips generated and disbursement queued.` : `Salary payable = (Basic ÷ ${totalDays} working days) × paid days. Edit basic salary inline, then process.`}
+              {processed ? `Salary processed for ${data.length} employees. Payslips generated and disbursement queued.` : `Salary payable = Basic − (Basic ÷ ${totalDays} working days) × LOP days. Present days and approved leave are paid; only absences (${elapsed} working days elapsed) reduce pay. Edit basic salary inline, then process.`}
             </span>
           </div>
 
           <TableShell
-            head={['Employee', { t: 'Basic salary', r: true }, { t: 'Total days', r: true }, { t: 'Paid days', r: true }, { t: 'Leave days', r: true }, { t: 'Salary payable', r: true }]}
+            head={['Employee', { t: 'Basic salary', r: true }, { t: 'Working days', r: true }, { t: 'Paid days', r: true }, { t: 'LOP days', r: true }, { t: 'Salary payable', r: true }]}
             foot={<tr><td style={{ ...td, fontWeight: 800, color: 'var(--ink-1)', borderBottom: 'none' }}>Total payable · {data.length}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{inr(totalBasic)}</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none', fontSize: 15, fontWeight: 800, color: 'var(--green)' }}>{inr(totalPayable)}</td></tr>}>
             {data.map((r) => (
               <tr key={r.e.id}>
@@ -228,7 +235,7 @@ export function PayrollMIS({ orgId, employees, leave, canManage, onToast }: { or
                 </td>
                 <td style={tdNum}>{totalDays}</td>
                 <td style={tdNum}>{r.paid}</td>
-                <td style={tdNum}>{r.leave}</td>
+                <td style={{ ...tdNum, color: r.lop ? 'var(--red)' : 'var(--ink-3)' }}>{r.lop}</td>
                 <td style={{ ...tdNum, fontWeight: 800, color: 'var(--ink-1)' }}>{inr(r.payable)}</td>
               </tr>
             ))}
