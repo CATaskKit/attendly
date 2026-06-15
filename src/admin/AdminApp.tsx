@@ -8,14 +8,16 @@ import {
 import {
   listEmployees, addEmployee, deleteEmployee, listLeave, decideLeave, listHolidays, addHoliday, deleteHoliday,
   dashboardStats, hasEmployees, seedSampleData, getOrganization, updateOrganization, listReimbursements,
-  listAnnouncements, listAnnouncementReads,
-  type Employee, type LeaveRow, type Holiday, type Stats, type Reimbursement, type Announcement, type AnnouncementRead,
+  listAnnouncements, listAnnouncementReads, listDepartments,
+  type Employee, type LeaveRow, type Holiday, type Stats, type Reimbursement, type Announcement, type AnnouncementRead, type Dept,
 } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
 import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, reimbursementEntitled, type OrgBilling, type PaymentRow } from '../lib/billing';
 import Settings from './Settings';
+import EmployeeImport, { type ImportRow } from './EmployeeImport';
 import { AttendanceMIS, PayrollMIS } from './mis';
 import { Reimbursements } from './reimbursements';
 import { Announcements } from './announcements';
@@ -58,6 +60,7 @@ export default function AdminApp() {
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [announcementReads, setAnnouncementReads] = useState<AnnouncementRead[]>([]);
+  const [departments, setDepartments] = useState<Dept[]>([]);
   const [toast, setToast] = useState<{ text: string; tone: string; icon: string } | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [search, setSearch] = useState('');
@@ -65,15 +68,16 @@ export default function AdminApp() {
   const fire = (text: string, tone = 'green', icon = 'checkCircle') => { setToast({ text, tone, icon }); setTimeout(() => setToast(null), 2600); };
 
   const reload = useCallback(async () => {
-    const [emp, lv, hol, st, bill, reimb, anns, annReads] = await Promise.all([
+    const [emp, lv, hol, st, bill, reimb, anns, annReads, depts] = await Promise.all([
       listEmployees(), listLeave(), listHolidays(), dashboardStats(),
       orgId ? fetchBilling(orgId) : Promise.resolve(null),
       listReimbursements().catch(() => [] as Reimbursement[]),
       listAnnouncements().catch(() => [] as Announcement[]),
       listAnnouncementReads().catch(() => [] as AnnouncementRead[]),
+      listDepartments().catch(() => [] as Dept[]),
     ]);
     setEmployees(emp); setLeave(lv); setHolidays(hol); setStats(st); setBilling(bill); setReimbursements(reimb);
-    setAnnouncements(anns); setAnnouncementReads(annReads);
+    setAnnouncements(anns); setAnnouncementReads(annReads); setDepartments(depts);
   }, [orgId]);
 
   useEffect(() => {
@@ -119,6 +123,31 @@ export default function AdminApp() {
   const onDeleteEmployee = async (id: string) => {
     try { await deleteEmployee(id); await reload(); fire('Employee removed', 'red', 'trash'); }
     catch (e) { console.error(e); fire('Delete failed', 'red', 'xCircle'); }
+  };
+  const onImportEmployees = async (importRows: ImportRow[]) => {
+    if (!orgId || !supabase) return;
+    const valid = importRows.filter((r) => r.name.trim());
+    const limit = billing ? seatLimit(billing) : Infinity;
+    if (employees.length + valid.length > limit) {
+      fire(`Importing ${valid.length} would exceed your ${planFor(billing!).name} plan's seats — upgrade first`, 'amber', 'wallet');
+      setPage('billing');
+      return;
+    }
+    try {
+      const { count } = await supabase.from('employees').select('id', { count: 'exact', head: true }).eq('org_id', orgId);
+      const start = count ?? 0;
+      const payload = valid.map((r, i) => ({
+        org_id: orgId,
+        code: r.code.trim() || `EMP-${String(start + i + 1).padStart(3, '0')}`,
+        name: r.name.trim(), email: r.email.trim() || null, dept: r.dept || null,
+        designation: r.designation.trim() || null, manager: r.manager || null,
+        type: r.type || 'Full-time', status: 'Active',
+      }));
+      const { error } = await supabase.from('employees').insert(payload);
+      if (error) throw error;
+      await reload();
+      fire(`${payload.length} employee${payload.length === 1 ? '' : 's'} imported`);
+    } catch (err) { console.error(err); fire('Import failed — employee codes must be unique', 'red', 'xCircle'); }
   };
 
   const onAddHoliday = async (h: Omit<Holiday, 'id'>) => {
@@ -214,7 +243,7 @@ export default function AdminApp() {
             ) : page === 'approvals' ? (
               <Approvals leave={shownLeave} role={role} onDecide={onDecide} />
             ) : page === 'employees' ? (
-              <Employees employees={shownEmployees} canManage={canManage} onAdd={onAddEmployee} onDelete={onDeleteEmployee} />
+              <Employees employees={shownEmployees} allEmployees={employees} departments={departments} canManage={canManage} onAdd={onAddEmployee} onImport={onImportEmployees} onDelete={onDeleteEmployee} />
             ) : page === 'holidays' ? (
               <Holidays holidays={shownHolidays} canManage={canManage} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
             ) : (
@@ -416,11 +445,13 @@ function Approvals({ leave, role, onDecide }: { leave: LeaveRow[]; role: string;
 
 // ── Employees ─────────────────────────────────────────────────────────
 const td: CSSProperties = { padding: '13px 18px', borderBottom: '1px solid var(--line)', fontSize: 13.5, color: 'var(--ink-2)', whiteSpace: 'nowrap' };
-function Employees({ employees, canManage, onAdd, onDelete }: { employees: Employee[]; canManage: boolean; onAdd: (e: Partial<Employee>) => void; onDelete: (id: string) => void }) {
+function Employees({ employees, allEmployees, departments, canManage, onAdd, onImport, onDelete }: { employees: Employee[]; allEmployees: Employee[]; departments: Dept[]; canManage: boolean; onAdd: (e: Partial<Employee>) => void; onImport: (rows: ImportRow[]) => Promise<void> | void; onDelete: (id: string) => void }) {
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   return (
     <div>
       <PageHead title="Employees" sub={`${employees.length} ${employees.length === 1 ? 'person' : 'people'}`}>
+        {canManage && <BtnGhost icon="download" onClick={() => setImporting(true)}>Import CSV</BtnGhost>}
         {canManage && <BtnPrimary icon="plus" onClick={() => setAdding(true)}>Add employee</BtnPrimary>}
       </PageHead>
       <ACard pad={0} style={{ overflow: 'hidden' }}>
@@ -443,12 +474,13 @@ function Employees({ employees, canManage, onAdd, onDelete }: { employees: Emplo
           </table>
         </div>
       </ACard>
-      {adding && <AddEmployeeModal onClose={() => setAdding(false)} onSave={(e) => { onAdd(e); setAdding(false); }} />}
+      {adding && <AddEmployeeModal departments={departments} employees={allEmployees} onClose={() => setAdding(false)} onSave={(e) => { onAdd(e); setAdding(false); }} />}
+      {importing && <EmployeeImport departments={departments} employees={allEmployees} onClose={() => setImporting(false)} onImport={async (rows) => { await onImport(rows); setImporting(false); }} />}
     </div>
   );
 }
 
-function AddEmployeeModal({ onClose, onSave }: { onClose: () => void; onSave: (e: Partial<Employee>) => void }) {
+function AddEmployeeModal({ departments, employees, onClose, onSave }: { departments: Dept[]; employees: Employee[]; onClose: () => void; onSave: (e: Partial<Employee>) => void }) {
   const [f, setF] = useState<Partial<Employee>>({ code: '', name: '', dept: '', designation: '', manager: '', type: 'Full-time', status: 'Active', email: '', phone: '' });
   const u = (k: keyof Employee, v: string) => setF((s) => ({ ...s, [k]: v }));
   const input: CSSProperties = { width: '100%', boxSizing: 'border-box', height: 42, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink-1)', outline: 'none' };
@@ -464,9 +496,19 @@ function AddEmployeeModal({ onClose, onSave }: { onClose: () => void; onSave: (e
         <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <label><span style={lbl}>Emp code *</span><input style={input} value={f.code || ''} onChange={(e) => u('code', e.target.value)} placeholder="CTK-1001" /></label>
           <label><span style={lbl}>Name *</span><input style={input} value={f.name || ''} onChange={(e) => u('name', e.target.value)} placeholder="Full name" /></label>
-          <label><span style={lbl}>Department</span><input style={input} value={f.dept || ''} onChange={(e) => u('dept', e.target.value)} placeholder="Engineering" /></label>
+          <label><span style={lbl}>Department</span>
+            <select style={{ ...input, appearance: 'none' }} value={f.dept || ''} onChange={(e) => u('dept', e.target.value)}>
+              <option value="">— Select —</option>
+              {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+            </select>
+          </label>
           <label><span style={lbl}>Designation</span><input style={input} value={f.designation || ''} onChange={(e) => u('designation', e.target.value)} placeholder="Engineer" /></label>
-          <label><span style={lbl}>Reporting to</span><input style={input} value={f.manager || ''} onChange={(e) => u('manager', e.target.value)} placeholder="Manager name" /></label>
+          <label><span style={lbl}>Reporting to</span>
+            <select style={{ ...input, appearance: 'none' }} value={f.manager || ''} onChange={(e) => u('manager', e.target.value)}>
+              <option value="">— None —</option>
+              {employees.map((emp) => <option key={emp.id} value={emp.name}>{emp.name} · {emp.code}</option>)}
+            </select>
+          </label>
           <label><span style={lbl}>Type</span>
             <select style={{ ...input, appearance: 'none' }} value={f.type || 'Full-time'} onChange={(e) => u('type', e.target.value)}>
               {['Full-time', 'Part-time', 'Contract'].map((o) => <option key={o}>{o}</option>)}
