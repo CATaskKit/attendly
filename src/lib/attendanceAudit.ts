@@ -1,8 +1,21 @@
+export type LocationError = 'denied' | 'unavailable' | 'timeout' | 'unsupported' | null;
+
 export type AttendanceAudit = {
   location: string | null;
+  locationError?: LocationError;
   ip: string | null;
   device: string;
 };
+
+// A user-facing prompt explaining how to fix a missing location.
+export function locationMessage(error: LocationError): string {
+  switch (error) {
+    case 'denied': return 'Location is off. Turn on location access for this site, then try again.';
+    case 'unsupported': return "This device can't share a location.";
+    case 'timeout': return "Couldn't get your location in time. Keep location on and retry.";
+    default: return 'Turn on location to check in, then try again.';
+  }
+}
 
 const IP_LOOKUP_URL = (import.meta.env.VITE_IP_LOOKUP_URL as string | undefined) || 'https://api.ipify.org?format=json';
 
@@ -43,21 +56,25 @@ export async function getNetworkIp(): Promise<string | null> {
   }
 }
 
-export async function getLocationLabel(): Promise<string | null> {
-  if (!navigator.geolocation) return null;
+export async function getLocation(): Promise<{ label: string | null; error: LocationError }> {
+  if (!navigator.geolocation) return { label: null, error: 'unsupported' };
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
-        resolve(`${roundCoord(latitude)}, ${roundCoord(longitude)} (±${Math.round(accuracy)} m)`);
+        resolve({ label: `${roundCoord(latitude)}, ${roundCoord(longitude)} (Â±${Math.round(accuracy)} m)`, error: null });
       },
-      () => resolve(null),
+      (err) => resolve({ label: null, error: err.code === err.PERMISSION_DENIED ? 'denied' : err.code === err.TIMEOUT ? 'timeout' : 'unavailable' }),
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
     );
   });
 }
 
+export async function getLocationLabel(): Promise<string | null> {
+  return (await getLocation()).label;
+}
+
 export async function collectAttendanceAudit(): Promise<AttendanceAudit> {
-  const [location, ip] = await Promise.all([getLocationLabel(), getNetworkIp()]);
-  return { location, ip, device: getDeviceInfo() };
+  const [loc, ip] = await Promise.all([getLocation(), getNetworkIp()]);
+  return { location: loc.label, locationError: loc.error, ip, device: getDeviceInfo() };
 }

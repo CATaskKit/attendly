@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, Card, Pill, SlideToConfirm } from './ui';
+import { locationMessage } from '../lib/attendanceAudit';
 import { MapView, VRow, SelfieTile } from './screens';
 import type { Ctx } from './data';
 import { APP_NAME } from '../lib/brand';
@@ -48,17 +49,27 @@ export function CheckInScreen({ ctx }: { ctx: Ctx }) {
   const confirm = () => {
     void refreshAttendanceAudit().then((latest) => doCheckIn(latest));
   };
-  const locationText = audit.location || (loadingAudit ? 'Detecting location...' : 'Location not allowed');
-  const ipText = audit.ip || (loadingAudit ? 'Detecting IP...' : 'Unavailable');
+  const retryLocation = () => {
+    setLoadingAudit(true);
+    void refreshAttendanceAudit().then((next) => setAudit(next)).finally(() => setLoadingAudit(false));
+  };
   const locationOk = !!audit.location;
+  const locationText = audit.location || (loadingAudit ? 'Detecting location...' : locationMessage(audit.locationError ?? null));
+  const ipText = audit.ip || (loadingAudit ? 'Detecting IP...' : 'Unavailable');
 
   return (
-    <Overlay title="Check In" onClose={closeOverlay} footer={<SlideToConfirm label="Slide to check in" onConfirm={confirm} />}>
+    <Overlay title="Check In" onClose={closeOverlay} footer={
+      locationOk
+        ? <SlideToConfirm label="Slide to check in" onConfirm={confirm} />
+        : <button onClick={retryLocation} disabled={loadingAudit} style={{ ...primaryBtn, opacity: loadingAudit ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9 }}>
+            <Icon name="mapPin" size={19} color="#fff" strokeWidth={2.2} />{loadingAudit ? 'Getting location…' : 'Enable location to check in'}
+          </button>
+    }>
       <MapView height={148} label={audit.location || 'Current device location'} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, background: locationOk ? 'var(--success-soft)' : 'var(--warning-soft)', borderRadius: 'var(--r-card)', padding: '11px 14px' }}>
-        <Icon name="shield" size={22} color={locationOk ? 'var(--success)' : 'var(--warning)'} strokeWidth={2} />
+        <Icon name={locationOk ? 'shield' : 'mapPin'} size={22} color={locationOk ? 'var(--success)' : 'var(--warning)'} strokeWidth={2} />
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: locationOk ? 'var(--success)' : 'var(--warning)' }}>{locationOk ? 'Location captured' : loadingAudit ? 'Capturing location' : 'Location unavailable'}</div>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: locationOk ? 'var(--success)' : 'var(--warning)' }}>{locationOk ? 'Location captured' : loadingAudit ? 'Getting your location…' : 'Location required'}</div>
           <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{locationText}</div>
         </div>
       </div>

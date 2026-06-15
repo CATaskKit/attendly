@@ -207,7 +207,7 @@ function AttendanceSettings({ orgId, canManage, notify }: SectionProps) {
     <SCard title="Attendance policy" desc="Rules applied when employees check in and out." action={canManage ? <BtnPrimary icon="check" onClick={() => notify('Attendance policy saved')}>Save</BtnPrimary> : undefined}>
       <SettingItem label="Late grace period" desc="Minutes after shift start before a late mark is applied."><SNumber value={c.grace} onChange={(v) => u('grace', v)} min={0} max={60} step={5} unit="min" /></SettingItem>
       <SettingItem label="Geofence radius" desc="Allowed distance from office location for a valid check-in."><SNumber value={c.geofence} onChange={(v) => u('geofence', v)} min={50} max={1000} step={50} unit="m" /></SettingItem>
-      <SettingItem label="Require GPS location" desc="Check-in is blocked without location permission."><SToggle on={c.gps} onChange={(v) => u('gps', v)} /></SettingItem>
+      <SettingItem label="Require GPS location" desc="Compulsory — check-in is blocked until the employee shares a location."><SToggle on={true} onChange={() => {}} disabled /></SettingItem>
       <SettingItem label="Require check-in selfie" desc="Capture a verification selfie on every check-in."><SToggle on={c.selfie} onChange={(v) => u('selfie', v)} /></SettingItem>
       <SettingItem label="Allow web check-in" desc="Permit attendance from the web app, not just mobile."><SToggle on={c.web} onChange={(v) => u('web', v)} /></SettingItem>
       <SettingItem label="Calculate overtime" desc="Track hours worked beyond the daily threshold.">

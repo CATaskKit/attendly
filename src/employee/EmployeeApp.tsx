@@ -15,7 +15,7 @@ import { listNotifications, markAllNotificationsRead, markNotificationRead, type
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
-import { collectAttendanceAudit, getDeviceInfo, type AttendanceAudit } from '../lib/attendanceAudit';
+import { collectAttendanceAudit, getDeviceInfo, locationMessage, type AttendanceAudit } from '../lib/attendanceAudit';
 import { fetchNetworkTime, formatAppDate, APP_TIME_ZONE } from '../lib/networkTime';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
@@ -307,6 +307,8 @@ export default function EmployeeApp() {
     fmtClock, fmtDur,
     openOverlay: setOverlay, closeOverlay: () => setOverlay(null),
     doCheckIn: (audit = attendanceAudit) => {
+      // Location is compulsory for an entry — block and prompt if it's missing.
+      if (!audit.location) { showToast(locationMessage(audit.locationError ?? null), 'x'); return; }
       void getPunchTime().then((localTime) => {
         if (!localTime) { showToast('You are not connected to the internet', 'x'); return; }
         setCheckInTime(localTime); setCheckOutTime(null); setStatus('in'); setOverlay(null); showToast('Checked in at ' + fmtClock(localTime));
