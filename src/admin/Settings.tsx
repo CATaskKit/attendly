@@ -167,11 +167,54 @@ const PERMS = [
   { k: 'Edit settings', def: [1, 1, 0, 0, 0] },
   { k: 'View audit logs', def: [1, 1, 0, 0, 0] },
 ];
+type PermMatrix = Record<string, Record<string, boolean>>;
+function gridFromMatrix(matrix: PermMatrix | null): number[][] {
+  return PERMS.map((p) => ROLE_NAMES.map((role, c) => {
+    if (c === 0) return 1; // Owner is always on
+    const v = matrix?.[p.k]?.[role];
+    return v === undefined ? p.def[c] : (v ? 1 : 0);
+  }));
+}
+function matrixFromGrid(grid: number[][]): PermMatrix {
+  const m: PermMatrix = {};
+  PERMS.forEach((p, r) => { m[p.k] = {}; ROLE_NAMES.forEach((role, c) => { m[p.k][role] = !!grid[r][c]; }); });
+  return m;
+}
+const rolePermsLocalKey = (orgId: string | null) => `attendly:settings:${orgId ?? 'demo'}:rolePerms`;
+
 function RolesSettings({ orgId, canManage, notify }: SectionProps) {
-  const [grid, setGrid] = useLocalSetting<number[][]>(orgId, 'rolePerms', PERMS.map((p) => p.def.slice()));
-  const flip = (r: number, c: number) => { if (c === 0) return; setGrid(grid.map((row, ri) => ri === r ? row.map((v, ci) => ci === c ? (v ? 0 : 1) : v) : row)); };
+  const [grid, setGrid] = useState<number[][]>(() => PERMS.map((p) => p.def.slice()));
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!supabase || !orgId) {
+      try { const raw = localStorage.getItem(rolePermsLocalKey(orgId)); if (raw) setGrid(JSON.parse(raw) as number[][]); } catch { /* ignore */ }
+      setLoading(false); return;
+    }
+    supabase.from('role_permissions').select('matrix').eq('org_id', orgId).maybeSingle()
+      .then(({ data, error }) => { if (error) console.error(error); setGrid(gridFromMatrix((data?.matrix as PermMatrix | undefined) ?? null)); setLoading(false); });
+  }, [orgId]);
+
+  const flip = (r: number, c: number) => { if (c === 0 || !canManage) return; setGrid(grid.map((row, ri) => ri === r ? row.map((v, ci) => ci === c ? (v ? 0 : 1) : v) : row)); };
+
+  const save = async () => {
+    if (!supabase || !orgId) {
+      try { localStorage.setItem(rolePermsLocalKey(orgId), JSON.stringify(grid)); } catch { /* ignore */ }
+      notify('Permissions updated'); return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('role_permissions').upsert({ org_id: orgId, matrix: matrixFromGrid(grid), updated_at: new Date().toISOString() });
+      if (error) throw error;
+      notify('Permissions updated');
+    } catch (e) { console.error(e); notify('Could not save permissions', 'red', 'xCircle'); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <Spinner label="Loading permissions…" />;
   return (
-    <SCard title="Roles & permissions" desc="Role-based access control. Owner permissions are locked." action={canManage ? <BtnPrimary icon="check" onClick={() => notify('Permissions updated')}>Save</BtnPrimary> : undefined}>
+    <SCard title="Roles & permissions" desc="Role-based access control. Owner permissions are locked." action={canManage ? <BtnPrimary icon="check" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary> : undefined}>
       <div style={{ overflowX: 'auto', margin: '0 -4px' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
           <thead><tr>
