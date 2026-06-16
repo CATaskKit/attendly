@@ -19,6 +19,7 @@ import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDa
 import Settings from './Settings';
 import EmployeeImport, { type ImportRow } from './EmployeeImport';
 import { AttendanceMIS, PayrollMIS } from './mis';
+import { usePermissions } from '../lib/permissions';
 import { Reimbursements } from './reimbursements';
 import { Announcements } from './announcements';
 import { weekendConfigFrom } from '../lib/calendar';
@@ -49,6 +50,13 @@ export default function AdminApp() {
   const { profile, role, signOut } = useAuth();
   const orgId = profile?.org_id ?? null;
   const canManage = role === 'owner' || role === 'hr';
+  // Fine-grained enforcement from the org's saved Roles & permissions matrix.
+  const { can } = usePermissions(orgId, role);
+  const canManageEmployees = can('Manage employees');
+  const canManageHolidays = can('Manage holidays');
+  const canApproveLeave = can('Approve leave');
+  const canRunPayroll = can('Run payroll MIS');
+  const canEditSettings = can('Edit settings');
 
   const [page, setPage] = useState<Page>('dashboard');
   const [loading, setLoading] = useState(true);
@@ -178,7 +186,7 @@ export default function AdminApp() {
           <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em' }}>Attendly</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {NAV.filter((it) => it.id !== 'reimbursements' || !billing || reimbursementActive(billing)).map((it) => {
+          {NAV.filter((it) => (it.id !== 'reimbursements' || !billing || reimbursementActive(billing)) && (it.id !== 'payroll' || canRunPayroll)).map((it) => {
             const on = page === it.id;
             return (
               <button key={it.id} onClick={() => setPage(it.id)} style={{
@@ -228,11 +236,11 @@ export default function AdminApp() {
             ) : page === 'reports' ? (
               <Reports orgId={orgId} onToast={fire} />
             ) : page === 'settings' ? (
-              <Settings orgId={orgId} canManage={canManage} onToast={fire} onGoBilling={() => setPage('billing')} />
+              <Settings orgId={orgId} canManage={canEditSettings} onToast={fire} onGoBilling={() => setPage('billing')} />
             ) : page === 'attendance' ? (
               <AttendanceMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} weekend={weekendConfigFrom(billing)} />
             ) : page === 'payroll' ? (
-              <PayrollMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} weekend={weekendConfigFrom(billing)} canManage={canManage} onToast={fire} />
+              canRunPayroll ? <PayrollMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} weekend={weekendConfigFrom(billing)} canManage={canRunPayroll} onToast={fire} /> : <NoAccess title="Payroll" />
             ) : page === 'reimbursements' ? (
               <Reimbursements rows={reimbursements} role={role} billing={billing} onChanged={() => { void reload(); }} onToast={fire} onGoBilling={() => setPage('billing')} />
             ) : page === 'announcements' ? (
@@ -241,11 +249,11 @@ export default function AdminApp() {
             : employees.length === 0 && leave.length === 0 ? (
               <EmptyState seeding={seeding} canSeed={canManage} onSeed={onSeed} />
             ) : page === 'approvals' ? (
-              <Approvals leave={shownLeave} role={role} onDecide={onDecide} />
+              <Approvals leave={shownLeave} role={role} canApprove={canApproveLeave} onDecide={onDecide} />
             ) : page === 'employees' ? (
-              <Employees employees={shownEmployees} allEmployees={employees} departments={departments} canManage={canManage} onAdd={onAddEmployee} onImport={onImportEmployees} onDelete={onDeleteEmployee} />
+              <Employees employees={shownEmployees} allEmployees={employees} departments={departments} canManage={canManageEmployees} onAdd={onAddEmployee} onImport={onImportEmployees} onDelete={onDeleteEmployee} />
             ) : page === 'holidays' ? (
-              <Holidays holidays={shownHolidays} canManage={canManage} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
+              <Holidays holidays={shownHolidays} canManage={canManageHolidays} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
             ) : (
               <Dashboard stats={stats} leave={shownLeave} reimbursements={reimbursements} reimbEnabled={!!billing && reimbursementActive(billing)} announcements={announcements} announcementReads={announcementReads} memberCount={employees.length} canManage={canManage} onGo={setPage} onDecide={onDecide} />
             )}
@@ -278,6 +286,17 @@ function EmptyManager() {
       <AIcon name="users" size={40} color="var(--ink-3)" />
       <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-1)', margin: '16px 0 6px' }}>Nothing to manage yet</h1>
       <p style={{ fontSize: 14, lineHeight: 1.6 }}>Once your team is added, employees and requests appear here.</p>
+    </div>
+  );
+}
+
+// Shown when the current role lacks a permission for a page (per Settings → Roles).
+function NoAccess({ title }: { title: string }) {
+  return (
+    <div style={{ maxWidth: 520, margin: '60px auto 0', textAlign: 'center', color: 'var(--ink-3)' }}>
+      <div style={{ width: 56, height: 56, borderRadius: 16, background: 'var(--soft)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><AIcon name="shield" size={26} color="var(--ink-3)" /></div>
+      <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-1)', margin: '16px 0 6px' }}>{title} is restricted</h1>
+      <p style={{ fontSize: 14, lineHeight: 1.6 }}>Your role doesn't have access to this section. An owner can grant it in Settings → Roles &amp; permissions.</p>
     </div>
   );
 }
@@ -391,11 +410,11 @@ function Dashboard({ stats, leave, reimbursements, reimbEnabled, announcements, 
 }
 
 // ── Leave Approvals ───────────────────────────────────────────────────
-function Approvals({ leave, role, onDecide }: { leave: LeaveRow[]; role: string; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
+function Approvals({ leave, role, canApprove, onDecide }: { leave: LeaveRow[]; role: string; canApprove: boolean; onDecide: (r: LeaveRow, a: 'approve' | 'reject') => void }) {
   const [tab, setTab] = useState('Pending');
   const filtered = leave.filter((r) => (tab === 'All' ? true : r.status === tab));
   const pendingCount = leave.filter((r) => r.status === 'Pending').length;
-  const canDecideRequest = (r: LeaveRow) => role === 'manager' ? r.stage === 'manager' : (role === 'owner' || role === 'hr') && r.stage !== 'manager';
+  const canDecideRequest = (r: LeaveRow) => canApprove && (role === 'manager' ? r.stage === 'manager' : (role === 'owner' || role === 'hr') && r.stage !== 'manager');
   return (
     <div>
       <PageHead title="Leave Approvals" sub={`${pendingCount} request${pendingCount === 1 ? '' : 's'} awaiting action`} />
