@@ -18,6 +18,7 @@ import { onTablesChange, onTableChange } from '../lib/realtime';
 import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, reimbursementEntitled, type OrgBilling, type PaymentRow } from '../lib/billing';
 import Settings from './Settings';
 import EmployeeImport, { type ImportRow } from './EmployeeImport';
+import InviteModal from './InviteModal';
 import { AttendanceMIS, PayrollMIS } from './mis';
 import { usePermissions } from '../lib/permissions';
 import { Reimbursements } from './reimbursements';
@@ -251,7 +252,7 @@ export default function AdminApp() {
             ) : page === 'approvals' ? (
               <Approvals leave={shownLeave} role={role} canApprove={canApproveLeave} onDecide={onDecide} />
             ) : page === 'employees' ? (
-              <Employees employees={shownEmployees} allEmployees={employees} departments={departments} canManage={canManageEmployees} onAdd={onAddEmployee} onImport={onImportEmployees} onDelete={onDeleteEmployee} />
+              <Employees employees={shownEmployees} allEmployees={employees} departments={departments} canManage={canManageEmployees} onAdd={onAddEmployee} onImport={onImportEmployees} onDelete={onDeleteEmployee} onToast={fire} />
             ) : page === 'holidays' ? (
               <Holidays holidays={shownHolidays} canManage={canManageHolidays} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
             ) : (
@@ -464,21 +465,26 @@ function Approvals({ leave, role, canApprove, onDecide }: { leave: LeaveRow[]; r
 
 // ── Employees ─────────────────────────────────────────────────────────
 const td: CSSProperties = { padding: '13px 18px', borderBottom: '1px solid var(--line)', fontSize: 13.5, color: 'var(--ink-2)', whiteSpace: 'nowrap' };
-function Employees({ employees, allEmployees, departments, canManage, onAdd, onImport, onDelete }: { employees: Employee[]; allEmployees: Employee[]; departments: Dept[]; canManage: boolean; onAdd: (e: Partial<Employee>) => void; onImport: (rows: ImportRow[]) => Promise<void> | void; onDelete: (id: string) => void }) {
+function Employees({ employees, allEmployees, departments, canManage, onAdd, onImport, onDelete, onToast }: { employees: Employee[]; allEmployees: Employee[]; departments: Dept[]; canManage: boolean; onAdd: (e: Partial<Employee>) => void; onImport: (rows: ImportRow[]) => Promise<void> | void; onDelete: (id: string) => void; onToast: (t: string, tone?: string, icon?: string) => void }) {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [inviting, setInviting] = useState<Employee | null>(null);
+  const pendingInvites = allEmployees.filter((e) => e.email && !e.profile_id).length;
+  const joinedCount = allEmployees.filter((e) => e.profile_id).length;
   return (
     <div>
-      <PageHead title="Employees" sub={`${employees.length} ${employees.length === 1 ? 'person' : 'people'}`}>
+      <PageHead title="Employees" sub={`${allEmployees.length} ${allEmployees.length === 1 ? 'person' : 'people'} · ${joinedCount} joined · ${pendingInvites} invite${pendingInvites === 1 ? '' : 's'} pending`}>
         {canManage && <BtnGhost icon="download" onClick={() => setImporting(true)}>Import CSV</BtnGhost>}
         {canManage && <BtnPrimary icon="plus" onClick={() => setAdding(true)}>Add employee</BtnPrimary>}
       </PageHead>
       <ACard pad={0} style={{ overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
-            <thead><tr>{['Employee', 'Department', 'Designation', 'Type', 'Reporting to', 'Status', ''].map((h, i) => <th key={i} style={{ textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '14px 18px', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>{h}</th>)}</tr></thead>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+            <thead><tr>{['Employee', 'Department', 'Designation', 'Type', 'Reporting to', 'Status', 'Access', ''].map((h, i) => <th key={i} style={{ textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '14px 18px', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>{h}</th>)}</tr></thead>
             <tbody>
-              {employees.map((e) => (
+              {employees.map((e) => {
+                const joined = !!e.profile_id;
+                return (
                 <tr key={e.id}>
                   <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><AAvatar name={e.name} size={36} /><div><div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink-1)' }}>{e.name}</div><div style={{ fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{e.code}</div></div></div></td>
                   <td style={td}>{e.dept || '—'}</td>
@@ -486,15 +492,24 @@ function Employees({ employees, allEmployees, departments, canManage, onAdd, onI
                   <td style={td}><APill tone="neutral">{e.type || '—'}</APill></td>
                   <td style={td}>{e.manager || '—'}</td>
                   <td style={td}><ABadge status={e.status} /></td>
+                  <td style={td}>
+                    <button onClick={() => setInviting(e)} title={joined ? 'Joined — manage access' : 'Show / resend invite'} style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>
+                      {joined
+                        ? <APill tone="green"><AIcon name="check" size={12} sw={3} />Joined</APill>
+                        : <APill tone="amber"><AIcon name="inbox" size={12} />{e.email ? 'Invite' : 'No email'}</APill>}
+                    </button>
+                  </td>
                   <td style={{ ...td, textAlign: 'right' }}>{canManage && <button onClick={() => onDelete(e.id)} title="Remove" style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 6 }}><AIcon name="trash" size={17} color="var(--ink-3)" /></button>}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
       </ACard>
       {adding && <AddEmployeeModal departments={departments} employees={allEmployees} onClose={() => setAdding(false)} onSave={(e) => { onAdd(e); setAdding(false); }} />}
       {importing && <EmployeeImport departments={departments} employees={allEmployees} onClose={() => setImporting(false)} onImport={async (rows) => { await onImport(rows); setImporting(false); }} />}
+      {inviting && <InviteModal employee={inviting} canManage={canManage} onClose={() => setInviting(null)} onToast={onToast} />}
     </div>
   );
 }
