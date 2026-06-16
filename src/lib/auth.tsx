@@ -34,6 +34,8 @@ type AuthContextValue = {
   updateProfile: (fields: Partial<Profile>) => Promise<{ error?: string }>;
   /** create the org for a freshly signed-up owner */
   createOrganization: (name: string) => Promise<{ error?: string }>;
+  /** sign up an invited employee and link them to the inviting org by email */
+  joinOrg: (fullName: string, email: string, password: string) => Promise<{ error?: string; joined?: boolean }>;
   signOut: () => Promise<void>;
   /** demo-mode only: pretend to sign in so the UI is explorable without keys */
   demoSignIn: () => void;
@@ -100,6 +102,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.user) {
       const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
       prof = (p as Profile) ?? null;
+      // If they aren't in an org yet, try to claim a matching employee invite
+      // (covers people who signed up before HR added them). Best-effort.
+      if (prof && !prof.org_id) {
+        try {
+          await supabase.rpc('claim_invite');
+          const { data: p2 } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
+          if (p2) prof = p2 as Profile;
+        } catch { /* claim_invite not available yet — ignore */ }
+      }
       setProfile(prof);
     }
     return { role: prof?.role, orgId: prof?.org_id ?? null };
@@ -111,6 +122,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email, password, options: { data: { full_name: fullName } },
     });
     return error ? { error: error.message } : {};
+  };
+
+  // Invited-employee signup: create the account, then confirm they were linked
+  // to an org (by the 0006 signup trigger, or a claim_invite fallback).
+  const joinOrg: AuthContextValue['joinOrg'] = async (fullName, email, password) => {
+    if (!supabase) { setDemo(true); return { joined: true }; }
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
+    if (error) return { error: error.message };
+    const uid = data.user?.id;
+    if (!uid) return { joined: false };
+    let { data: prof } = await supabase.from('profiles').select('*').eq('id', uid).single();
+    if (!prof?.org_id) {
+      try {
+        await supabase.rpc('claim_invite');
+        const { data: p2 } = await supabase.from('profiles').select('*').eq('id', uid).single();
+        if (p2) prof = p2;
+      } catch { /* claim_invite not available yet — ignore */ }
+    }
+    setProfile((prof as Profile) ?? null);
+    return { joined: !!(prof as Profile | null)?.org_id };
   };
 
   const sendPasswordReset: AuthContextValue['sendPasswordReset'] = async (email) => {
@@ -187,6 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     updatePassword,
     updateProfile,
     createOrganization,
+    joinOrg,
     signOut,
     demoSignIn,
   };

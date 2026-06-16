@@ -78,11 +78,11 @@ function Field({
   );
 }
 
-type Mode = 'signin' | 'signup' | 'forgot' | 'reset';
+type Mode = 'signin' | 'signup' | 'join' | 'forgot' | 'reset';
 
 function LoginScreen() {
   const navigate = useNavigate();
-  const { configured, signIn, signUp, sendPasswordReset, updatePassword, createOrganization, demoSignIn } = useAuth();
+  const { configured, signIn, signUp, joinOrg, sendPasswordReset, updatePassword, createOrganization, demoSignIn } = useAuth();
 
   const isResetLink = new URLSearchParams(window.location.search).has('reset-password');
   const [mode, setMode] = useState<Mode>(isResetLink ? 'reset' : 'signin');
@@ -108,7 +108,7 @@ function LoginScreen() {
     const e: typeof errors = {};
     const trimmedEmail = email.trim();
     const needsEmail = mode !== 'reset';
-    if (mode === 'signup' && !fullName.trim()) e.name = 'Enter your name';
+    if ((mode === 'signup' || mode === 'join') && !fullName.trim()) e.name = 'Enter your name';
     if (mode === 'signup' && !company.trim()) e.company = 'Enter your company';
     if (needsEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) e.email = 'Enter a valid work email';
     if (mode !== 'forgot' && pw.length < 6) e.pw = configured ? 'At least 6 characters' : 'Enter your password';
@@ -129,6 +129,16 @@ function LoginScreen() {
       const { error } = await updatePassword(pw);
       if (error) { setFormError(error); setPhase('idle'); triggerShake(); return; }
       navigate('/app');
+      return;
+    }
+
+    if (mode === 'join') {
+      const { error, joined } = await joinOrg(fullName.trim(), trimmedEmail, pw);
+      if (error) { setFormError(error); setPhase('idle'); triggerShake(); return; }
+      if (joined) { navigate('/app'); return; }
+      // Account created but no invite matched their email yet.
+      setFormError(`No invite found for ${trimmedEmail}. Ask your HR/admin to add you with this email, then sign in.`);
+      setPhase('idle');
       return;
     }
 
@@ -157,18 +167,21 @@ function LoginScreen() {
   };
 
   const isSignup = mode === 'signup';
+  const isJoin = mode === 'join';
   const isForgot = mode === 'forgot';
   const isReset = mode === 'reset';
-  const title = isSignup ? 'Create your workspace' : isForgot ? 'Reset password' : isReset ? 'Create new password' : 'Welcome back';
+  const title = isSignup ? 'Create your workspace' : isJoin ? 'Join your workspace' : isForgot ? 'Reset password' : isReset ? 'Create new password' : 'Welcome back';
   const subtitle = isSignup
     ? 'Set up your company and become the Owner.'
-    : isForgot
-      ? 'Enter your work email and we will send a secure reset link.'
-      : isReset
-        ? 'Choose a new password for your account.'
-        : 'Sign in to mark your attendance and manage leave.';
-  const primaryText = isForgot ? 'Send reset link' : isReset ? 'Update password' : isSignup ? 'Create workspace' : 'Sign in';
-  const busyText = isForgot ? 'Sending...' : isReset ? 'Updating...' : isSignup ? 'Creating...' : 'Signing in...';
+    : isJoin
+      ? 'Your HR added you — set a password to join with your work email.'
+      : isForgot
+        ? 'Enter your work email and we will send a secure reset link.'
+        : isReset
+          ? 'Choose a new password for your account.'
+          : 'Sign in to mark your attendance and manage leave.';
+  const primaryText = isForgot ? 'Send reset link' : isReset ? 'Update password' : isSignup ? 'Create workspace' : isJoin ? 'Join workspace' : 'Sign in';
+  const busyText = isForgot ? 'Sending...' : isReset ? 'Updating...' : isSignup ? 'Creating...' : isJoin ? 'Joining...' : 'Signing in...';
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)', position: 'relative', overflow: 'hidden' }}>
@@ -194,11 +207,11 @@ function LoginScreen() {
         </div>
 
         <div style={{ marginTop: 26, animation: shake ? 'loginShake .42s cubic-bezier(.36,.07,.19,.97)' : 'none' }}>
+          {(isSignup || isJoin) && (
+            <Field icon="user" label="Your name" value={fullName} onChange={setFullName} placeholder="Rohan Kapoor" error={errors.name} onFocus={() => setErrors((s) => ({ ...s, name: null }))} />
+          )}
           {isSignup && (
-            <>
-              <Field icon="user" label="Your name" value={fullName} onChange={setFullName} placeholder="Rohan Kapoor" error={errors.name} onFocus={() => setErrors((s) => ({ ...s, name: null }))} />
-              <Field icon="building" label="Company" value={company} onChange={setCompany} placeholder="Acme Technologies" error={errors.company} onFocus={() => setErrors((s) => ({ ...s, company: null }))} />
-            </>
+            <Field icon="building" label="Company" value={company} onChange={setCompany} placeholder="Acme Technologies" error={errors.company} onFocus={() => setErrors((s) => ({ ...s, company: null }))} />
           )}
           {!isReset && (
             <Field
@@ -209,8 +222,8 @@ function LoginScreen() {
           )}
           {!isForgot && (
             <Field
-              icon="lock" type={showPw ? 'text' : 'password'} label={isReset ? 'New password' : 'Password'} autoComplete={isSignup || isReset ? 'new-password' : 'current-password'}
-              value={pw} onChange={setPw} placeholder={isSignup || isReset ? 'Create a password' : 'Enter your password'}
+              icon="lock" type={showPw ? 'text' : 'password'} label={isReset ? 'New password' : isJoin ? 'Set a password' : 'Password'} autoComplete={isSignup || isJoin || isReset ? 'new-password' : 'current-password'}
+              value={pw} onChange={setPw} placeholder={isSignup || isJoin || isReset ? 'Create a password' : 'Enter your password'}
               error={errors.pw} onFocus={() => setErrors((s) => ({ ...s, pw: null }))}
               trailing={
                 <button onClick={() => setShowPw((s) => !s)} style={loginStyles.eyeBtn} aria-label="Toggle password">
@@ -284,10 +297,15 @@ function LoginScreen() {
           <div style={{ textAlign: 'center', fontSize: 13.5, color: 'var(--text-3)', fontWeight: 500 }}>
             {isSignup ? (
               <>Already have a workspace? <button onClick={() => { setMode('signin'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Sign in</button></>
+            ) : isJoin ? (
+              <>Already have an account? <button onClick={() => { setMode('signin'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Sign in</button></>
             ) : isForgot || isReset ? (
               <>Remembered it? <button onClick={() => { setMode('signin'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Sign in</button></>
             ) : (
-              <>New here? <button onClick={() => { setMode('signup'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Create a workspace</button></>
+              <>
+                <div>Invited by your team? <button onClick={() => { setMode('join'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Join your workspace</button></div>
+                <div style={{ marginTop: 6 }}>Setting up a new company? <button onClick={() => { setMode('signup'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Create a workspace</button></div>
+              </>
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 16, color: 'var(--text-3)' }}>
