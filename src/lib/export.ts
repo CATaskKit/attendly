@@ -77,6 +77,17 @@ export async function downloadWorkbookServer(orgName: string): Promise<void> {
   URL.revokeObjectURL(a.href);
 }
 
+/** Build & download a multi-sheet .xlsx from plain row arrays (client-side). */
+export function downloadSheets(filename: string, sheets: { name: string; rows: Record<string, unknown>[] }[]): void {
+  const wb = XLSX.utils.book_new();
+  for (const sh of sheets) {
+    const ws = sh.rows.length ? XLSX.utils.json_to_sheet(sh.rows) : XLSX.utils.aoa_to_sheet([['No records']]);
+    if (sh.rows.length) ws['!cols'] = autoWidths(sh.rows);
+    XLSX.utils.book_append_sheet(wb, ws, sh.name.slice(0, 31));
+  }
+  XLSX.writeFile(wb, filename, { compression: true });
+}
+
 export function downloadWorkbook(data: ExportData, orgName: string): void {
   const wb = XLSX.utils.book_new();
 

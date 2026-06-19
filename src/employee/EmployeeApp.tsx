@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth';
 import {
   applyLeave, checkIn, checkOut, decideTeamLeave, ensureMyEmployee, getTodayAttendance,
   listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
-  applyReimbursement, myReimbursements, compOffEarned,
+  applyReimbursement, myReimbursements, compOffEarned, getOrganizationSettings,
   listAnnouncements, listAnnouncementReads, markAnnouncementRead,
   type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow, type Reimbursement, type Announcement,
 } from '../lib/api';
@@ -15,7 +15,7 @@ import { listNotifications, markAllNotificationsRead, markNotificationRead, type
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
-import { collectAttendanceAudit, getDeviceInfo, locationMessage, type AttendanceAudit } from '../lib/attendanceAudit';
+import { collectAttendanceAudit, getDeviceInfo, locationMessage, distanceMeters, type AttendanceAudit } from '../lib/attendanceAudit';
 import { fetchNetworkTime, formatAppDate, APP_TIME_ZONE } from '../lib/networkTime';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
@@ -160,6 +160,7 @@ export default function EmployeeApp() {
   const [reimbState, setReimbState] = useState<{ enabled: boolean; requireManager: boolean }>({ enabled: false, requireManager: true });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [readAnnIds, setReadAnnIds] = useState<Set<string>>(new Set());
+  const [geo, setGeo] = useState<{ enabled: boolean; lat: number | null; lng: number | null; radius: number }>({ enabled: false, lat: null, lng: null, radius: 150 });
   const [attendanceAudit, setAttendanceAudit] = useState<AttendanceAudit>(() => ({ location: null, ip: null, device: getDeviceInfo() }));
 
   const [tab, setTab] = useState('home');
@@ -207,7 +208,7 @@ export default function EmployeeApp() {
     try {
       const emp = await ensureMyEmployee(profile);
       setEmployee(emp);
-      const [leaveRows, attRows, balances, holidayRows, today, approvals, reimbRows, billing, annRows, annReads] = await Promise.all([
+      const [leaveRows, attRows, balances, holidayRows, today, approvals, reimbRows, billing, annRows, annReads, orgSettings] = await Promise.all([
         myLeave(profile, emp),
         listMyAttendance(orgId, emp),
         myLeaveBalances(orgId, emp),
@@ -218,7 +219,10 @@ export default function EmployeeApp() {
         fetchBilling(orgId).catch(() => null),
         listAnnouncements().catch(() => [] as Announcement[]),
         listAnnouncementReads().catch(() => []),
+        getOrganizationSettings(orgId).catch(() => ({} as Record<string, unknown>)),
       ]);
+      const ap = ((orgSettings as Record<string, unknown>).attendancePolicy ?? {}) as { geofence?: number; geo?: boolean; officeLat?: number; officeLng?: number };
+      setGeo({ enabled: !!ap.geo && ap.officeLat != null && ap.officeLng != null, lat: ap.officeLat ?? null, lng: ap.officeLng ?? null, radius: Number(ap.geofence) || 150 });
       setLeaveRequests(leaveRows.map(mapLeave));
       setAttendanceRows(attRows);
       // Comp-off balance = earned extra-work days (weekend/holiday attendance,
@@ -277,6 +281,7 @@ export default function EmployeeApp() {
     setReimbState({ enabled: false, requireManager: true });
     setAnnouncements([]);
     setReadAnnIds(new Set());
+    setGeo({ enabled: false, lat: null, lng: null, radius: 150 });
   }, [live]);
 
   const showToast = (text: string, icon = 'checkCircle') => {
@@ -309,6 +314,12 @@ export default function EmployeeApp() {
     doCheckIn: (audit = attendanceAudit) => {
       // Location is compulsory for an entry — block and prompt if it's missing.
       if (!audit.location) { showToast(locationMessage(audit.locationError ?? null), 'x'); return; }
+      // Geofence: block check-ins outside the office radius when the org enforces it.
+      if (geo.enabled && geo.lat != null && geo.lng != null) {
+        if (audit.lat == null || audit.lng == null) { showToast('Turn on precise location to check in at this office.', 'x'); return; }
+        const dist = distanceMeters(audit.lat, audit.lng, geo.lat, geo.lng);
+        if (dist > geo.radius) { showToast(`You're ${Math.round(dist)} m from the office (limit ${geo.radius} m). Move closer to check in.`, 'x'); return; }
+      }
       void getPunchTime().then((localTime) => {
         if (!localTime) { showToast('You are not connected to the internet', 'x'); return; }
         setCheckInTime(localTime); setCheckOutTime(null); setStatus('in'); setOverlay(null); showToast('Checked in at ' + fmtClock(localTime));

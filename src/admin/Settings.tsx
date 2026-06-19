@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { AIcon, ACard, APill, BtnPrimary, BtnGhost, PageHead, Spinner } from './ui';
 import { getOrganization, updateOrganization, getOrganizationSettings, setOrganizationSetting } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { getLocation } from '../lib/attendanceAudit';
 
 // Restored from the original design handoff (admin-settings.jsx). Company
 // profile and Leave policy are wired live to Supabase; the policy/roles/security/
@@ -294,12 +295,30 @@ function RolesSettings({ orgId, canManage, notify }: SectionProps) {
 }
 
 // ── 3. Attendance policy (local) ─────────────────────────────────────
+type AttPolicy = { geofence: number; ot: number; half: number; selfie: boolean; web: boolean; otOn: boolean; geo: boolean; officeLat: number | null; officeLng: number | null };
 function AttendanceSettings({ orgId, canManage, notify }: SectionProps) {
-  const [c, setC] = useOrgSetting(orgId, 'attendancePolicy', { geofence: 150, ot: 8, half: 4, selfie: true, gps: true, web: false, otOn: true });
-  const u = (k: keyof typeof c, v: number | boolean) => setC({ ...c, [k]: v });
+  const [c, setC] = useOrgSetting<AttPolicy>(orgId, 'attendancePolicy', { geofence: 150, ot: 8, half: 4, selfie: true, web: false, otOn: true, geo: false, officeLat: null, officeLng: null });
+  const u = (k: keyof AttPolicy, v: number | boolean) => setC({ ...c, [k]: v });
+  const [locating, setLocating] = useState(false);
+  const captureOffice = async () => {
+    setLocating(true);
+    try {
+      const loc = await getLocation();
+      if (loc.lat == null || loc.lng == null) { notify('Could not get location — turn it on and retry', 'red', 'xCircle'); return; }
+      setC({ ...c, officeLat: Math.round(loc.lat * 1e6) / 1e6, officeLng: Math.round(loc.lng * 1e6) / 1e6 });
+      notify('Office location set from this device');
+    } catch { notify('Could not get location', 'red', 'xCircle'); }
+    finally { setLocating(false); }
+  };
   return (
     <SCard title="Attendance policy" desc="Rules applied when employees check in and out. Shift timing & late grace are set in Work week." action={canManage ? <BtnPrimary icon="check" onClick={() => notify('Attendance policy saved')}>Save</BtnPrimary> : undefined}>
-      <SettingItem label="Geofence radius" desc="Allowed distance from office location for a valid check-in."><SNumber value={c.geofence} onChange={(v) => u('geofence', v)} min={50} max={1000} step={50} unit="m" /></SettingItem>
+      <SettingItem label="Restrict check-in to office" desc="Block check-ins beyond the geofence radius of the office location. Employees must share GPS to check in.">
+        <SToggle on={c.geo} onChange={(v) => u('geo', v)} disabled={!canManage} />
+      </SettingItem>
+      <SettingItem label="Office location" desc={c.officeLat != null ? `Set to ${c.officeLat}, ${c.officeLng}. Capture again from a device at the office to update.` : 'Not set. Open this from a device at the office and capture its location.'}>
+        <BtnGhost icon="shield" onClick={() => void captureOffice()} disabled={!canManage || locating}>{locating ? 'Locating…' : 'Use current location'}</BtnGhost>
+      </SettingItem>
+      <SettingItem label="Geofence radius" desc="Allowed distance from the office location for a valid check-in."><SNumber value={c.geofence} onChange={(v) => u('geofence', v)} min={50} max={1000} step={50} unit="m" /></SettingItem>
       <SettingItem label="Require GPS location" desc="Compulsory — check-in is blocked until the employee shares a location."><SToggle on={true} onChange={() => {}} disabled /></SettingItem>
       <SettingItem label="Require check-in selfie" desc="Capture a verification selfie on every check-in."><SToggle on={c.selfie} onChange={(v) => u('selfie', v)} /></SettingItem>
       <SettingItem label="Allow web check-in" desc="Permit attendance from the web app, not just mobile."><SToggle on={c.web} onChange={(v) => u('web', v)} /></SettingItem>

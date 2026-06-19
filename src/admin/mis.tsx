@@ -5,6 +5,7 @@ import type { Employee, LeaveRow, Holiday } from '../lib/api';
 import { setEmployeeBasicSalary } from '../lib/api';
 import { countExtraDays } from '../lib/compoff';
 import { countWorkingDays, type WeekendConfig } from '../lib/calendar';
+import { downloadSheets } from '../lib/export';
 import { lateThresholdMinutes, type ShiftPolicy } from '../lib/shift';
 
 // Restored from the original design handoff (admin-screens2.jsx). Both screens
@@ -116,11 +117,51 @@ export function AttendanceMIS({ orgId, employees, leave, holidays, weekend, shif
   });
   const sum = (k: 'present' | 'leave' | 'absent' | 'late' | 'extra') => data.reduce((a, r) => a + r[k], 0);
   const fmtHrs = (h: number) => `${Math.floor(h)}h ${String(Math.round((h % 1) * 60)).padStart(2, '0')}m`;
+  const [exporting, setExporting] = useState(false);
+
+  // Full attendance report: a per-employee summary + a complete day-by-day log.
+  const exportXlsx = async () => {
+    setExporting(true);
+    try {
+      const summaryRows = data.map((r) => ({
+        Employee: r.e.name, Code: r.e.code, Department: r.e.dept || '',
+        'Present days': r.present, 'Leave days': r.leave, 'Absent days': r.absent,
+        'Late marks': r.late, 'Extra days': r.extra, 'Working hours': Number(r.hrs.toFixed(2)),
+      }));
+      let detailRows: Record<string, unknown>[] = [];
+      if (supabase && orgId) {
+        const y = now.getFullYear(), m = now.getMonth();
+        const start = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+        const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        const empById = new Map(employees.map((e) => [e.id, e]));
+        const { data: det } = await supabase.from('attendance')
+          .select('employee_id,day,check_in_at,check_out_at,status,work_seconds,location')
+          .eq('org_id', orgId).gte('day', start).lte('day', end).order('day', { ascending: true });
+        detailRows = (det ?? []).map((r) => {
+          const e = empById.get(r.employee_id as string);
+          const ci = r.check_in_at ? new Date(r.check_in_at as string) : null;
+          const co = r.check_out_at ? new Date(r.check_out_at as string) : null;
+          const mins = ci ? ci.getHours() * 60 + ci.getMinutes() : null;
+          return {
+            Date: r.day, Employee: e?.name || '—', Code: e?.code || '', Department: e?.dept || '',
+            'Check in': ci ? ci.toLocaleTimeString() : '', 'Check out': co ? co.toLocaleTimeString() : '',
+            Hours: r.work_seconds ? Number((Number(r.work_seconds) / 3600).toFixed(2)) : 0,
+            Status: (r.status as string) || '', Late: mins != null && mins > lateAfter ? 'Yes' : '', Location: (r.location as string) || '',
+          };
+        });
+      }
+      downloadSheets(`Attendance_${MONTH_LABEL.replace(/[^a-z0-9]+/gi, '_')}.xlsx`, [
+        { name: 'Summary', rows: summaryRows },
+        { name: 'Daily Log', rows: detailRows },
+      ]);
+    } catch (e) { console.error(e); }
+    finally { setExporting(false); }
+  };
 
   return (
     <div>
       <PageHead title="Attendance MIS" sub={`${MONTH_LABEL} · monthly attendance report`}>
-        <BtnGhost icon="download">Excel</BtnGhost>
+        <BtnGhost icon="download" onClick={() => void exportXlsx()} disabled={exporting || loading || active.length === 0}>{exporting ? 'Exporting…' : 'Excel'}</BtnGhost>
       </PageHead>
       {loading ? <Spinner label="Computing attendance…" /> : active.length === 0 ? <EmptyTable label="No active employees" /> : (
         <>
@@ -198,11 +239,20 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
   const totalExtra = data.reduce((a, r) => a + r.extra, 0);
 
   const doProcess = () => { setProcessed(true); onToast(`Salary processed · ${inr(totalPayable)} queued for ${data.length} employees`); };
+  const exportXlsx = () => {
+    const rows = data.map((r) => ({
+      Employee: r.e.name, Code: r.e.code, Department: r.e.dept || '',
+      'Basic salary': Math.round(r.basic), 'Working days': totalDays, 'Paid days': r.paid,
+      'LOP days': r.lop, 'Extra days': r.extra, 'LOP deduction': Math.round(r.deduction),
+      Overtime: Math.round(r.overtime), 'Salary payable': Math.round(r.payable),
+    }));
+    downloadSheets(`Payroll_${MONTH_LABEL.replace(/[^a-z0-9]+/gi, '_')}.xlsx`, [{ name: 'Payroll', rows }]);
+  };
 
   return (
     <div>
       <PageHead title="Payroll" sub={`${MONTH_LABEL} pay run · ${totalDays} working days`}>
-        <BtnGhost icon="download">Excel</BtnGhost>
+        <BtnGhost icon="download" onClick={exportXlsx} disabled={loading || active.length === 0}>Excel</BtnGhost>
         {canManage && (processed ? <BtnGhost icon="checkCircle">Download payslips</BtnGhost> : <BtnPrimary icon="wallet" onClick={doProcess}>Process salary</BtnPrimary>)}
       </PageHead>
       {loading ? <Spinner label="Computing payroll…" /> : active.length === 0 ? <EmptyTable label="No active employees" /> : (

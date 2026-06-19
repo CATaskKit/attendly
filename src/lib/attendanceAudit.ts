@@ -5,9 +5,20 @@ export type LocationError = 'denied' | 'unavailable' | 'timeout' | 'unsupported'
 export type AttendanceAudit = {
   location: string | null;
   locationError?: LocationError;
+  lat?: number | null;
+  lng?: number | null;
   ip: string | null;
   device: string;
 };
+
+/** Great-circle distance in metres between two lat/lng points (haversine). */
+export function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
 
 // A user-facing prompt explaining how to fix a missing location.
 export function locationMessage(error: LocationError): string {
@@ -62,7 +73,9 @@ function fmtLocation(latitude: number, longitude: number, accuracy: number): str
   return `${roundCoord(latitude)}, ${roundCoord(longitude)} (±${Math.round(accuracy)} m)`;
 }
 
-export async function getLocation(): Promise<{ label: string | null; error: LocationError }> {
+export type LocationResult = { label: string | null; error: LocationError; lat: number | null; lng: number | null };
+
+export async function getLocation(): Promise<LocationResult> {
   // Native (Capacitor): use the Geolocation plugin so Android runtime location
   // permissions are requested properly inside the installed app.
   if (Capacitor.isNativePlatform()) {
@@ -73,25 +86,25 @@ export async function getLocation(): Promise<{ label: string | null; error: Loca
         perm = await Geolocation.requestPermissions();
       }
       if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
-        return { label: null, error: 'denied' };
+        return { label: null, error: 'denied', lat: null, lng: null };
       }
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 12000 });
       const { latitude, longitude, accuracy } = pos.coords;
-      return { label: fmtLocation(latitude, longitude, accuracy ?? 0), error: null };
+      return { label: fmtLocation(latitude, longitude, accuracy ?? 0), error: null, lat: latitude, lng: longitude };
     } catch {
-      return { label: null, error: 'unavailable' };
+      return { label: null, error: 'unavailable', lat: null, lng: null };
     }
   }
 
   // Web: the standard geolocation API (HTTPS + the browser's permission prompt).
-  if (!navigator.geolocation) return { label: null, error: 'unsupported' };
+  if (!navigator.geolocation) return { label: null, error: 'unsupported', lat: null, lng: null };
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
-        resolve({ label: fmtLocation(latitude, longitude, accuracy), error: null });
+        resolve({ label: fmtLocation(latitude, longitude, accuracy), error: null, lat: latitude, lng: longitude });
       },
-      (err) => resolve({ label: null, error: err.code === err.PERMISSION_DENIED ? 'denied' : err.code === err.TIMEOUT ? 'timeout' : 'unavailable' }),
+      (err) => resolve({ label: null, error: err.code === err.PERMISSION_DENIED ? 'denied' : err.code === err.TIMEOUT ? 'timeout' : 'unavailable', lat: null, lng: null }),
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
     );
   });
@@ -103,5 +116,5 @@ export async function getLocationLabel(): Promise<string | null> {
 
 export async function collectAttendanceAudit(): Promise<AttendanceAudit> {
   const [loc, ip] = await Promise.all([getLocation(), getNetworkIp()]);
-  return { location: loc.label, locationError: loc.error, ip, device: getDeviceInfo() };
+  return { location: loc.label, locationError: loc.error, lat: loc.lat, lng: loc.lng, ip, device: getDeviceInfo() };
 }
