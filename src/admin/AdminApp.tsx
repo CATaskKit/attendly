@@ -24,6 +24,7 @@ import { usePermissions } from '../lib/permissions';
 import { Reimbursements } from './reimbursements';
 import { Announcements } from './announcements';
 import { weekendConfigFrom } from '../lib/calendar';
+import { shiftPolicyFrom } from '../lib/shift';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 const fmtRange = (a: string | null, b: string | null) => {
@@ -239,7 +240,7 @@ export default function AdminApp() {
             ) : page === 'settings' ? (
               <Settings orgId={orgId} canManage={canEditSettings} onToast={fire} onGoBilling={() => setPage('billing')} />
             ) : page === 'attendance' ? (
-              <AttendanceMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} weekend={weekendConfigFrom(billing)} />
+              <AttendanceMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} weekend={weekendConfigFrom(billing)} shift={shiftPolicyFrom(billing)} />
             ) : page === 'payroll' ? (
               canRunPayroll ? <PayrollMIS orgId={orgId} employees={employees} leave={leave} holidays={holidays} weekend={weekendConfigFrom(billing)} canManage={canRunPayroll} onToast={fire} /> : <NoAccess title="Payroll" />
             ) : page === 'reimbursements' ? (

@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { AIcon, AAvatar, ACard, APill, ABadge, PageHead, BtnGhost, BtnPrimary, Spinner } from './ui';
 import { supabase } from '../lib/supabase';
 import type { Employee, LeaveRow, Holiday } from '../lib/api';
+import { setEmployeeBasicSalary } from '../lib/api';
 import { countExtraDays } from '../lib/compoff';
 import { countWorkingDays, type WeekendConfig } from '../lib/calendar';
+import { lateThresholdMinutes, type ShiftPolicy } from '../lib/shift';
 
 // Restored from the original design handoff (admin-screens2.jsx). Both screens
 // are computed from live data: real employees + this month's attendance rows +
@@ -84,7 +86,7 @@ function leaveDaysByCode(leave: LeaveRow[]): Record<string, number> {
 }
 
 // ── ATTENDANCE MIS ───────────────────────────────────────────────────
-export function AttendanceMIS({ orgId, employees, leave, holidays, weekend }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[]; weekend: WeekendConfig }) {
+export function AttendanceMIS({ orgId, employees, leave, holidays, weekend, shift }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[]; weekend: WeekendConfig; shift: ShiftPolicy }) {
   const { rows, loading } = useMonthAttendance(orgId);
   const active = employees.filter((e) => e.status === 'Active');
 
@@ -94,6 +96,7 @@ export function AttendanceMIS({ orgId, employees, leave, holidays, weekend }: { 
   const weekdaysElapsed = countWorkingDays(now.getFullYear(), now.getMonth(), 1, Math.min(today, lastDay), weekend);
   const leaveByCode = useMemo(() => leaveDaysByCode(leave), [leave]);
   const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
+  const lateAfter = lateThresholdMinutes(shift); // minutes-since-midnight: shift start + grace
 
   const data = active.map((e) => {
     const mine = rows.filter((r) => r.employee_id === e.id);
@@ -103,7 +106,7 @@ export function AttendanceMIS({ orgId, employees, leave, holidays, weekend }: { 
       if (!r.check_in_at) return false;
       const t = new Date(r.check_in_at);
       const mins = t.getHours() * 60 + t.getMinutes();
-      return mins > 9 * 60 + 35; // after 09:35 (09:30 shift + grace)
+      return mins > lateAfter; // after the org's shift start + grace
     }).length;
     const lv = leaveByCode[e.code] ?? 0;
     const extra = countExtraDays(mine.map((r) => r.day), holidaySet, weekend); // weekend/holiday work → comp-off
@@ -164,15 +167,12 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
   const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
   const [payExtra, setPayExtra] = useState(false); // pay extra (weekend/holiday) days as overtime
 
-  // Basic salary per employee code — no backend column, so persisted locally.
-  const storeKey = `attendly:payroll:${orgId ?? 'demo'}:salary`;
-  const [salary, setSalary] = useState<Record<string, number>>(() => {
-    try { return JSON.parse(localStorage.getItem(storeKey) || '{}'); } catch { return {}; }
-  });
-  const setBasic = (code: string, v: number) => {
-    const next = { ...salary, [code]: v };
-    setSalary(next);
-    try { localStorage.setItem(storeKey, JSON.stringify(next)); } catch { /* ignore */ }
+  // Basic salary lives on employees.basic_salary (shared & persisted). A local
+  // override keeps the input snappy until the parent re-fetches employees.
+  const [edits, setEdits] = useState<Record<string, number>>({});
+  const setBasic = (id: string, v: number) => {
+    setEdits((p) => ({ ...p, [id]: v }));
+    setEmployeeBasicSalary(id, v).catch((err) => { console.error(err); onToast('Could not save salary', 'red', 'xCircle'); });
   };
   const [processed, setProcessed] = useState(false);
 
@@ -180,7 +180,7 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
     const mine = rows.filter((r) => r.employee_id === e.id);
     const present = new Set(mine.map((r) => r.day)).size;
     const lv = leaveByCode[e.code] ?? 0;
-    const basic = salary[e.code] ?? 70000;
+    const basic = edits[e.id] ?? (Number(e.basic_salary) || 0);
     const perDay = totalDays > 0 ? basic / totalDays : 0;
     const extra = countExtraDays(mine.map((r) => r.day), holidaySet, weekend); // weekend/holiday work → comp-off, not regular attendance
     // Loss-of-pay = working days elapsed not covered by WEEKDAY attendance or paid leave.
@@ -253,7 +253,7 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
               <tr key={r.e.id}>
                 <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><AAvatar name={r.e.name} size={32} /><div><div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-1)' }}>{r.e.name}</div><div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{r.e.dept || '—'}</div></div></div></td>
                 <td style={{ ...tdNum, padding: '8px 18px' }}>
-                  <input type="number" value={r.basic} disabled={!canManage} onChange={(ev) => setBasic(r.e.code, Number(ev.target.value) || 0)}
+                  <input type="number" value={r.basic} disabled={!canManage} onChange={(ev) => setBasic(r.e.id, Number(ev.target.value) || 0)}
                     style={{ width: 110, textAlign: 'right', height: 34, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', padding: '0 10px', fontSize: 13, fontWeight: 700, color: 'var(--ink-1)', fontFamily: 'inherit', outline: 'none', fontVariantNumeric: 'tabular-nums' }} />
                 </td>
                 <td style={tdNum}>{totalDays}</td>

@@ -56,6 +56,9 @@ export type OrgBilling = {
   reimbursement_disabled: boolean;
   weekend_days: number[] | null;
   weekend_sat_alt: string | null;
+  shift_start: string | null;
+  shift_end: string | null;
+  late_grace_min: number | null;
 };
 
 /** The org's 1-year period is still open (free or paid). */
@@ -160,25 +163,27 @@ export async function fetchBilling(orgId: string): Promise<OrgBilling | null> {
   if (!isSupabaseConfigured) {
     // Demo mode: a free org with a fresh 1-year period so Billing renders.
     const periodEnd = new Date(Date.now() + YEAR_MS).toISOString();
-    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd, reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null };
+    return { id: orgId, name: 'Demo workspace', plan: 'free', subscription_status: 'free', seats: null, trial_ends_at: periodEnd, current_period_end: periodEnd, reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null, shift_start: '09:30', shift_end: '18:30', late_grace_min: 5 };
   }
   const full = await db().from('organizations')
-    .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager,reimbursement_disabled,weekend_days,weekend_sat_alt')
+    .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager,reimbursement_disabled,weekend_days,weekend_sat_alt,shift_start,shift_end,late_grace_min')
     .eq('id', orgId).single();
   if (!full.error) return (full.data as OrgBilling) ?? null;
 
-  // reimbursement_disabled lands in 0010; reimbursement_enabled/require_manager in
-  // 0006. Fall back progressively so the page keeps working mid-migration.
+  // shift_* lands in 0013; weekend_* in 0011; reimbursement_disabled in 0010;
+  // reimbursement_enabled/require_manager in 0006. Fall back progressively so the
+  // page keeps working mid-migration (defaults preserve prior behaviour).
+  const SHIFT_DEFAULTS = { shift_start: '09:30', shift_end: '18:30', late_grace_min: 5 } as const;
   const mid = await db().from('organizations')
     .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end,reimbursement_enabled,reimbursement_require_manager')
     .eq('id', orgId).single();
-  if (!mid.error) return mid.data ? { ...(mid.data as Omit<OrgBilling, 'reimbursement_disabled' | 'weekend_days' | 'weekend_sat_alt'>), reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null } : null;
+  if (!mid.error) return mid.data ? { ...(mid.data as Omit<OrgBilling, 'reimbursement_disabled' | 'weekend_days' | 'weekend_sat_alt' | 'shift_start' | 'shift_end' | 'late_grace_min'>), reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null, ...SHIFT_DEFAULTS } : null;
 
   const base = await db().from('organizations')
     .select('id,name,plan,subscription_status,seats,trial_ends_at,current_period_end')
     .eq('id', orgId).single();
   if (base.error) throw base.error;
-  return base.data ? { ...(base.data as Omit<OrgBilling, 'reimbursement_enabled' | 'reimbursement_require_manager' | 'reimbursement_disabled' | 'weekend_days' | 'weekend_sat_alt'>), reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null } : null;
+  return base.data ? { ...(base.data as Omit<OrgBilling, 'reimbursement_enabled' | 'reimbursement_require_manager' | 'reimbursement_disabled' | 'weekend_days' | 'weekend_sat_alt' | 'shift_start' | 'shift_end' | 'late_grace_min'>), reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null, ...SHIFT_DEFAULTS } : null;
 }
 
 export type PaymentRow = { id: string; amount_inr: number; seats: number; period_end: string; created_at: string };

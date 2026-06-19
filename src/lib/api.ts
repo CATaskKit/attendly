@@ -6,7 +6,7 @@ import { DEFAULT_WEEKEND, type WeekendConfig } from './calendar';
 export type Employee = {
   id: string; code: string; name: string; dept: string | null; designation: string | null;
   manager: string | null; type: string | null; status: string; email: string | null;
-  phone: string | null; joined: string | null; profile_id?: string | null;
+  phone: string | null; joined: string | null; profile_id?: string | null; basic_salary?: number | null;
 };
 
 export type LeaveRow = {
@@ -157,7 +157,7 @@ export async function listLeaveTypes(): Promise<LeaveType[]> {
 }
 
 // ── Organization + onboarding writes ──────────────────────────────────
-export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean; reimbursement_disabled?: boolean; weekend_days?: number[] | null; weekend_sat_alt?: string | null };
+export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean; reimbursement_disabled?: boolean; weekend_days?: number[] | null; weekend_sat_alt?: string | null; shift_start?: string | null; shift_end?: string | null; late_grace_min?: number | null };
 
 export async function getOrganization(orgId: string): Promise<OrgRow | null> {
   const { data, error } = await db().from('organizations').select('*').eq('id', orgId).single();
@@ -167,6 +167,25 @@ export async function getOrganization(orgId: string): Promise<OrgRow | null> {
 
 export async function updateOrganization(orgId: string, fields: Partial<OrgRow>): Promise<void> {
   const { error } = await db().from('organizations').update(fields).eq('id', orgId);
+  if (error) throw error;
+}
+
+// ── Org settings (JSON blob) + per-employee basic salary ───────────────
+export async function getOrganizationSettings(orgId: string): Promise<Record<string, unknown>> {
+  const { data, error } = await db().from('organizations').select('settings').eq('id', orgId).single();
+  if (error) throw error;
+  return (data?.settings as Record<string, unknown>) ?? {};
+}
+
+/** Merge one section's value into organizations.settings (read-modify-write). */
+export async function setOrganizationSetting(orgId: string, key: string, value: unknown): Promise<void> {
+  const current = await getOrganizationSettings(orgId).catch(() => ({}));
+  const { error } = await db().from('organizations').update({ settings: { ...current, [key]: value } }).eq('id', orgId);
+  if (error) throw error;
+}
+
+export async function setEmployeeBasicSalary(employeeId: string, value: number): Promise<void> {
+  const { error } = await db().from('employees').update({ basic_salary: value }).eq('id', employeeId);
   if (error) throw error;
 }
 

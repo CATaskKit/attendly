@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { AIcon, ACard, APill, BtnPrimary, BtnGhost, PageHead, Spinner } from './ui';
-import { getOrganization, updateOrganization } from '../lib/api';
+import { getOrganization, updateOrganization, getOrganizationSettings, setOrganizationSetting } from '../lib/api';
 import { supabase } from '../lib/supabase';
 
 // Restored from the original design handoff (admin-settings.jsx). Company
@@ -74,13 +74,25 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-// Per-org local settings persistence (for sections with no backend table yet).
-function useLocalSetting<T>(orgId: string | null, key: string, fallback: T): [T, (v: T) => void] {
+// Org-wide settings persistence. Stored in organizations.settings (shared across
+// every admin/device); a localStorage copy gives an instant first paint and a
+// demo-mode fallback when Supabase isn't configured.
+function useOrgSetting<T>(orgId: string | null, key: string, fallback: T): [T, (v: T) => void] {
   const storeKey = `attendly:settings:${orgId ?? 'demo'}:${key}`;
   const [val, setVal] = useState<T>(() => {
     try { const raw = localStorage.getItem(storeKey); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
   });
-  const update = (v: T) => { setVal(v); try { localStorage.setItem(storeKey, JSON.stringify(v)); } catch { /* ignore */ } };
+  useEffect(() => {
+    if (!supabase || !orgId) return;
+    getOrganizationSettings(orgId)
+      .then((s) => { if (s && Object.prototype.hasOwnProperty.call(s, key)) setVal(s[key] as T); })
+      .catch(() => { /* keep local/fallback */ });
+  }, [orgId, key]);
+  const update = (v: T) => {
+    setVal(v);
+    try { localStorage.setItem(storeKey, JSON.stringify(v)); } catch { /* ignore */ }
+    if (supabase && orgId) setOrganizationSetting(orgId, key, v).catch(console.error);
+  };
   return [val, update];
 }
 
@@ -91,9 +103,6 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
   const [cfg, setCfg] = useState({ name: '', industry: 'Software / IT', country: 'India', tz: 'Asia/Kolkata', currency: 'INR' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [offDays, setOffDays] = useState<number[]>([0]);          // weekly off days among Sun–Fri (Sat is the rule below)
-  const [satRule, setSatRule] = useState<'off' | 'even' | 'odd' | 'work'>('off');
-  const [shift, setShift] = useLocalSetting(orgId, 'shift', { start: '09:30', end: '18:30' });
   const upd = (k: keyof typeof cfg, v: string) => setCfg((c) => ({ ...c, [k]: v }));
 
   useEffect(() => {
@@ -101,26 +110,18 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
     getOrganization(orgId).then((o) => {
       if (!o) return;
       setCfg({ name: o.display_name || o.name, industry: o.industry || 'Software / IT', country: o.country || 'India', tz: o.timezone || 'Asia/Kolkata', currency: o.currency || 'INR' });
-      const wd = Array.isArray(o.weekend_days) ? o.weekend_days : [0, 6];
-      setOffDays(wd.filter((d) => d !== 6));
-      setSatRule(o.weekend_sat_alt === 'even' ? 'even' : o.weekend_sat_alt === 'odd' ? 'odd' : wd.includes(6) ? 'off' : 'work');
     }).catch(console.error).finally(() => setLoading(false));
   }, [orgId]);
 
   const save = async () => {
-    const weekend_days = [...offDays, ...(satRule === 'off' ? [6] : [])].sort((a, b) => a - b);
-    const weekend_sat_alt = satRule === 'even' ? 'even' : satRule === 'odd' ? 'odd' : null;
     if (!orgId) { notify('Company profile saved'); return; }
     setSaving(true);
     try {
-      await updateOrganization(orgId, { display_name: cfg.name, industry: cfg.industry, country: cfg.country, timezone: cfg.tz, currency: cfg.currency, weekend_days, weekend_sat_alt });
+      await updateOrganization(orgId, { display_name: cfg.name, industry: cfg.industry, country: cfg.country, timezone: cfg.tz, currency: cfg.currency });
       notify('Company profile saved');
     } catch (e) { console.error(e); notify('Could not save profile', 'red', 'xCircle'); }
     finally { setSaving(false); }
   };
-  const toggleDay = (n: number) => setOffDays(offDays.includes(n) ? offDays.filter((x) => x !== n) : [...offDays, n]);
-  const SAT_OPTS: Record<string, 'off' | 'even' | 'odd' | 'work'> = { 'Off every week': 'off', '2nd & 4th off': 'even', '1st & 3rd off': 'odd', 'Working': 'work' };
-  const satLabel = Object.keys(SAT_OPTS).find((k) => SAT_OPTS[k] === satRule) ?? 'Off every week';
 
   if (loading) return <Spinner label="Loading company profile…" />;
   return (
@@ -131,9 +132,56 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
         <Field label="Country"><SSelect value={cfg.country} onChange={(v) => upd('country', v)} options={['India', 'United States', 'United Kingdom', 'Singapore', 'UAE']} /></Field>
         <Field label="Currency"><SSelect value={cfg.currency} onChange={(v) => upd('currency', v)} options={['INR', 'USD', 'GBP', 'SGD', 'AED']} /></Field>
       </div>
-      <SettingItem label="Timezone" desc="Used for attendance timestamps and reports.">
+      <SettingItem label="Timezone" desc="Used for attendance timestamps and reports." last>
         <div style={{ width: 240 }}><SSelect value={cfg.tz} onChange={(v) => upd('tz', v)} options={['Asia/Kolkata', 'Asia/Dubai', 'Europe/London', 'America/New_York', 'Asia/Singapore']} /></div>
       </SettingItem>
+    </SCard>
+  );
+}
+
+// ── 1b. Work week (LIVE) — weekend policy + shift timing ─────────────
+// These persist to the organizations row and drive payroll working-day counts,
+// comp-off (weekend/holiday work), and late-marking in the Attendance MIS.
+function WorkWeekSettings({ orgId, canManage, notify }: SectionProps) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [offDays, setOffDays] = useState<number[]>([0]);          // weekly off days among Sun–Fri (Sat is the rule below)
+  const [satRule, setSatRule] = useState<'off' | 'even' | 'odd' | 'work'>('off');
+  const [shiftStart, setShiftStart] = useState('09:30');
+  const [shiftEnd, setShiftEnd] = useState('18:30');
+  const [grace, setGrace] = useState(5);
+
+  useEffect(() => {
+    if (!supabase || !orgId) { setLoading(false); return; }
+    getOrganization(orgId).then((o) => {
+      if (!o) return;
+      const wd = Array.isArray(o.weekend_days) ? o.weekend_days : [0, 6];
+      setOffDays(wd.filter((d) => d !== 6));
+      setSatRule(o.weekend_sat_alt === 'even' ? 'even' : o.weekend_sat_alt === 'odd' ? 'odd' : wd.includes(6) ? 'off' : 'work');
+      setShiftStart(o.shift_start || '09:30');
+      setShiftEnd(o.shift_end || '18:30');
+      setGrace(o.late_grace_min == null ? 5 : Number(o.late_grace_min));
+    }).catch(console.error).finally(() => setLoading(false));
+  }, [orgId]);
+
+  const save = async () => {
+    const weekend_days = [...offDays, ...(satRule === 'off' ? [6] : [])].sort((a, b) => a - b);
+    const weekend_sat_alt = satRule === 'even' ? 'even' : satRule === 'odd' ? 'odd' : null;
+    if (!supabase || !orgId) { notify('Work week saved'); return; }
+    setSaving(true);
+    try {
+      await updateOrganization(orgId, { weekend_days, weekend_sat_alt, shift_start: shiftStart, shift_end: shiftEnd, late_grace_min: grace });
+      notify('Work week saved');
+    } catch (e) { console.error(e); notify('Could not save work week', 'red', 'xCircle'); }
+    finally { setSaving(false); }
+  };
+  const toggleDay = (n: number) => setOffDays(offDays.includes(n) ? offDays.filter((x) => x !== n) : [...offDays, n]);
+  const SAT_OPTS: Record<string, 'off' | 'even' | 'odd' | 'work'> = { 'Off every week': 'off', '2nd & 4th off': 'even', '1st & 3rd off': 'odd', 'Working': 'work' };
+  const satLabel = Object.keys(SAT_OPTS).find((k) => SAT_OPTS[k] === satRule) ?? 'Off every week';
+
+  if (loading) return <Spinner label="Loading work week…" />;
+  return (
+    <SCard title="Work week" desc="Weekend policy and shift timing. These drive payroll working days, comp-off, and late-marking — set them to match how your company actually works (6-day weeks, alternate Saturdays, etc.)." action={canManage ? <BtnPrimary icon="check" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</BtnPrimary> : undefined}>
       <SettingItem label="Weekly off days" desc="Highlighted days are non-working — they're excluded from payroll working days, and attendance on them earns comp-off.">
         <div style={{ display: 'flex', gap: 6 }}>
           {[{ n: 0, l: 'Sun' }, { n: 1, l: 'Mon' }, { n: 2, l: 'Tue' }, { n: 3, l: 'Wed' }, { n: 4, l: 'Thu' }, { n: 5, l: 'Fri' }].map((d) => {
@@ -142,15 +190,18 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
           })}
         </div>
       </SettingItem>
-      <SettingItem label="Saturdays" desc="Set a fixed or alternate-Saturday week-off policy.">
+      <SettingItem label="Saturdays" desc="Fixed or alternate-Saturday week-off policy (e.g. 2nd & 4th Saturday off).">
         <div style={{ width: 200 }}><SSelect value={satLabel} onChange={(v) => canManage && setSatRule(SAT_OPTS[v])} options={Object.keys(SAT_OPTS)} /></div>
       </SettingItem>
-      <SettingItem label="Standard shift" desc="Default office hours for new employees." last>
+      <SettingItem label="Standard shift" desc="Office hours. The start time is the basis for late-marking.">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <SInput value={shift.start} onChange={(e) => setShift({ ...shift, start: e.target.value })} style={{ width: 96, textAlign: 'center' }} />
+          <SInput type="time" value={shiftStart} disabled={!canManage} onChange={(e) => setShiftStart(e.target.value)} style={{ width: 120, textAlign: 'center' }} />
           <span style={{ color: 'var(--ink-3)' }}>to</span>
-          <SInput value={shift.end} onChange={(e) => setShift({ ...shift, end: e.target.value })} style={{ width: 96, textAlign: 'center' }} />
+          <SInput type="time" value={shiftEnd} disabled={!canManage} onChange={(e) => setShiftEnd(e.target.value)} style={{ width: 120, textAlign: 'center' }} />
         </div>
+      </SettingItem>
+      <SettingItem label="Late grace period" desc="Minutes after shift start before a check-in is marked late." last>
+        <SNumber value={grace} onChange={setGrace} min={0} max={60} step={5} unit="min" />
       </SettingItem>
     </SCard>
   );
@@ -244,11 +295,10 @@ function RolesSettings({ orgId, canManage, notify }: SectionProps) {
 
 // ── 3. Attendance policy (local) ─────────────────────────────────────
 function AttendanceSettings({ orgId, canManage, notify }: SectionProps) {
-  const [c, setC] = useLocalSetting(orgId, 'attendancePolicy', { grace: 10, geofence: 150, ot: 8, half: 4, selfie: true, gps: true, web: false, otOn: true });
+  const [c, setC] = useOrgSetting(orgId, 'attendancePolicy', { geofence: 150, ot: 8, half: 4, selfie: true, gps: true, web: false, otOn: true });
   const u = (k: keyof typeof c, v: number | boolean) => setC({ ...c, [k]: v });
   return (
-    <SCard title="Attendance policy" desc="Rules applied when employees check in and out." action={canManage ? <BtnPrimary icon="check" onClick={() => notify('Attendance policy saved')}>Save</BtnPrimary> : undefined}>
-      <SettingItem label="Late grace period" desc="Minutes after shift start before a late mark is applied."><SNumber value={c.grace} onChange={(v) => u('grace', v)} min={0} max={60} step={5} unit="min" /></SettingItem>
+    <SCard title="Attendance policy" desc="Rules applied when employees check in and out. Shift timing & late grace are set in Work week." action={canManage ? <BtnPrimary icon="check" onClick={() => notify('Attendance policy saved')}>Save</BtnPrimary> : undefined}>
       <SettingItem label="Geofence radius" desc="Allowed distance from office location for a valid check-in."><SNumber value={c.geofence} onChange={(v) => u('geofence', v)} min={50} max={1000} step={50} unit="m" /></SettingItem>
       <SettingItem label="Require GPS location" desc="Compulsory — check-in is blocked until the employee shares a location."><SToggle on={true} onChange={() => {}} disabled /></SettingItem>
       <SettingItem label="Require check-in selfie" desc="Capture a verification selfie on every check-in."><SToggle on={c.selfie} onChange={(v) => u('selfie', v)} /></SettingItem>
@@ -330,7 +380,7 @@ function LeaveSettings({ orgId, canManage, notify }: SectionProps) {
 
 // ── 5. Security (local) ──────────────────────────────────────────────
 function SecuritySettings({ orgId, canManage, notify }: SectionProps) {
-  const [c, setC] = useLocalSetting(orgId, 'security', { twofa: true, enforce: true, timeout: '30 minutes', minlen: 10, symbols: true });
+  const [c, setC] = useOrgSetting(orgId, 'security', { twofa: true, enforce: true, timeout: '30 minutes', minlen: 10, symbols: true });
   const u = (k: keyof typeof c, v: number | string | boolean) => setC({ ...c, [k]: v });
   const statuses = [['Row Level Security', "Every tenant's data is isolated at the database level", 'Enabled'], ['Audit logging', 'All admin actions are recorded with actor and timestamp', 'On'], ['Encryption at rest', 'Sensitive fields encrypted with AES-256', 'AES-256']];
   return (
@@ -358,7 +408,7 @@ function SecuritySettings({ orgId, canManage, notify }: SectionProps) {
 // ── 6. Notifications (local) ─────────────────────────────────────────
 const NOTIF_EVENTS = ['Check-in / check-out', 'Leave applied', 'Leave approved', 'Leave rejected', 'New leave request (approver)', 'Payroll MIS generated'];
 function NotifSettings({ orgId, canManage, notify }: SectionProps) {
-  const [grid, setGrid] = useLocalSetting<boolean[][]>(orgId, 'notifPrefs', NOTIF_EVENTS.map((_, i) => [i !== 5, true]));
+  const [grid, setGrid] = useOrgSetting<boolean[][]>(orgId, 'notifPrefs', NOTIF_EVENTS.map((_, i) => [i !== 5, true]));
   const flip = (r: number, c: number) => setGrid(grid.map((row, ri) => ri === r ? row.map((v, ci) => ci === c ? !v : v) : row));
   return (
     <SCard title="Notifications" desc="Choose how employees and approvers are notified." action={canManage ? <BtnPrimary icon="check" onClick={() => notify('Notification preferences saved')}>Save</BtnPrimary> : undefined}>
@@ -397,6 +447,7 @@ function SubscriptionSettings({ goBilling }: SectionProps) {
 // ── Settings shell ───────────────────────────────────────────────────
 const SETTINGS_NAV = [
   { id: 'company', icon: 'building', label: 'Company profile', Body: CompanySettings },
+  { id: 'workweek', icon: 'calendar', label: 'Work week', Body: WorkWeekSettings },
   { id: 'roles', icon: 'users', label: 'Roles & permissions', Body: RolesSettings },
   { id: 'attendance', icon: 'clock', label: 'Attendance policy', Body: AttendanceSettings },
   { id: 'leave', icon: 'calendarClock', label: 'Leave policy', Body: LeaveSettings },
