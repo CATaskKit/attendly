@@ -82,10 +82,14 @@ type Mode = 'signin' | 'signup' | 'join' | 'forgot' | 'reset';
 
 function LoginScreen() {
   const navigate = useNavigate();
-  const { configured, signIn, signUp, joinOrg, sendPasswordReset, updatePassword, createOrganization, demoSignIn } = useAuth();
+  const { configured, signIn, signUp, joinOrg, sendPasswordReset, updatePassword, createOrganization, demoSignIn, recovery, clearRecovery } = useAuth();
 
-  const isResetLink = new URLSearchParams(window.location.search).has('reset-password');
+  // Show the set-new-password screen for a recovery link — either via the
+  // ?reset-password=1 flag or the Supabase PASSWORD_RECOVERY event (robust even
+  // if the redirect drops the query param).
+  const isResetLink = recovery || new URLSearchParams(window.location.search).has('reset-password');
   const [mode, setMode] = useState<Mode>(isResetLink ? 'reset' : 'signin');
+  useEffect(() => { if (recovery) setMode('reset'); }, [recovery]);
   const [fullName, setFullName] = useState('');
   const [company, setCompany] = useState('');
   const [email, setEmail] = useState(configured ? '' : 'aarav.mehta@ontime.co');
@@ -128,6 +132,7 @@ function LoginScreen() {
     if (mode === 'reset') {
       const { error } = await updatePassword(pw);
       if (error) { setFormError(error); setPhase('idle'); triggerShake(); return; }
+      clearRecovery();
       navigate('/app');
       return;
     }
@@ -339,12 +344,13 @@ const loginStyles: Record<string, CSSProperties> = {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { authed, loading, role, profile } = useAuth();
+  const { authed, loading, role, profile, recovery } = useAuth();
   const vars = themeVars(DEFAULT_TWEAKS);
-  const isResetLink = new URLSearchParams(window.location.search).has('reset-password');
+  const isResetLink = recovery || new URLSearchParams(window.location.search).has('reset-password');
 
   // Already signed in → route to the right home for the role (admins land in the
-  // admin console, everyone else in the employee app).
+  // admin console, everyone else in the employee app). A password-recovery
+  // session must NOT auto-route — keep the user on the set-new-password screen.
   useEffect(() => {
     if (loading || !authed || isResetLink) return;
     navigate(landingFor(role, profile?.org_id ?? null), { replace: true });

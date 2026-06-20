@@ -40,6 +40,9 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   /** demo-mode only: pretend to sign in so the UI is explorable without keys */
   demoSignIn: () => void;
+  /** true after a password-recovery link is opened — show the set-new-password screen */
+  recovery: boolean;
+  clearRecovery: () => void;
 };
 
 const DEMO_PROFILE: Profile = {
@@ -63,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [demo, setDemo] = useState(false);
+  const [recovery, setRecovery] = useState(false);
 
   // Load (and keep fresh) the session + profile when Supabase is configured.
   useEffect(() => {
@@ -86,6 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // to resolve the session — awaiting deadlocks every call that follows
     // (e.g. create_organization right after signUp). Defer to the next tick.
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      // A recovery link opens a session too — flag it so the UI prompts for a new
+      // password instead of silently logging the user in (magic-link behaviour).
+      if (_e === 'PASSWORD_RECOVERY') setRecovery(true);
       setSession(s);
       if (s) setTimeout(() => { void loadProfile(s.user.id); }, 0);
       else setProfile(null);
@@ -222,6 +229,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     joinOrg,
     signOut,
     demoSignIn,
+    recovery,
+    clearRecovery: () => setRecovery(false),
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
