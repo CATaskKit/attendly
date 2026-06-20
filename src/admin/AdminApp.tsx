@@ -534,7 +534,34 @@ function AddEmployeeModal({ departments, employees, initial, onClose, onSave }: 
   const u = (k: keyof Employee, v: string) => setF((s) => ({ ...s, [k]: v }));
   const input: CSSProperties = { width: '100%', boxSizing: 'border-box', height: 42, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink-1)', outline: 'none' };
   const lbl: CSSProperties = { display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink-2)', marginBottom: 6 };
-  const save = () => { if (!f.code?.trim() || !f.name?.trim()) return; onSave(f); };
+
+  // System role (owner/hr/manager/employee) lives on the linked profile, so it
+  // can only be set for an employee who has joined (has a profile_id).
+  const joined = !!initial?.profile_id;
+  const [memberRole, setMemberRole] = useState('employee');
+  const [loadedRole, setLoadedRole] = useState('');
+  useEffect(() => {
+    let active = true;
+    if (!joined || !initial?.profile_id || !supabase) return;
+    void supabase.from('profiles').select('role').eq('id', initial.profile_id).single().then(({ data }) => {
+      if (!active) return;
+      const r = (data?.role as string) || 'employee';
+      setMemberRole(r); setLoadedRole(r);
+    });
+    return () => { active = false; };
+  }, [joined, initial?.profile_id]);
+  const roleOptions: [string, string][] = loadedRole === 'owner'
+    ? [['owner', 'Owner'], ['hr', 'HR'], ['manager', 'Manager'], ['employee', 'Employee']]
+    : [['hr', 'HR'], ['manager', 'Manager'], ['employee', 'Employee']];
+
+  const save = async () => {
+    if (!f.code?.trim() || !f.name?.trim()) return;
+    if (joined && initial?.profile_id && supabase && memberRole && memberRole !== loadedRole) {
+      const { error } = await supabase.from('profiles').update({ role: memberRole }).eq('id', initial.profile_id);
+      if (error) console.error('Role update failed', error);
+    }
+    onSave(f);
+  };
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(15,23,34,0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 520, maxWidth: '100%', background: 'var(--panel)', borderRadius: 18, boxShadow: '0 30px 80px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
@@ -558,6 +585,22 @@ function AddEmployeeModal({ departments, employees, initial, onClose, onSave }: 
               {employees.map((emp) => <option key={emp.id} value={emp.name}>{emp.name} · {emp.code}</option>)}
             </select>
           </label>
+          {isEdit && (
+            <label style={{ gridColumn: '1 / -1' }}><span style={lbl}>Role / access level</span>
+              {joined ? (
+                <select style={{ ...input, appearance: 'none' }} value={memberRole} onChange={(e) => setMemberRole(e.target.value)}>
+                  {roleOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              ) : (
+                <select style={{ ...input, appearance: 'none', opacity: 0.6 }} value="employee" disabled>
+                  <option value="employee">Employee — set once they join</option>
+                </select>
+              )}
+              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--ink-3)', marginTop: 5, lineHeight: 1.4 }}>
+                {joined ? 'Managers approve their team’s leave; HR & Owner run the admin console.' : 'A system role can be assigned after this person joins with their email.'}
+              </span>
+            </label>
+          )}
           <label><span style={lbl}>Type</span>
             <select style={{ ...input, appearance: 'none' }} value={f.type || 'Full-time'} onChange={(e) => u('type', e.target.value)}>
               {['Full-time', 'Part-time', 'Contract'].map((o) => <option key={o}>{o}</option>)}
