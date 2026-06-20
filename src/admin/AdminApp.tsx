@@ -420,7 +420,9 @@ function Approvals({ leave, role, canApprove, onDecide }: { leave: LeaveRow[]; r
   const [tab, setTab] = useState('Pending');
   const filtered = leave.filter((r) => (tab === 'All' ? true : r.status === tab));
   const pendingCount = leave.filter((r) => r.status === 'Pending').length;
-  const canDecideRequest = (r: LeaveRow) => canApprove && (role === 'manager' ? r.stage === 'manager' : (role === 'owner' || role === 'hr') && r.stage !== 'manager');
+  // Managers act only on their team's manager-stage requests; owner/HR can
+  // decide any pending request (and override a manager who hasn't acted).
+  const canDecideRequest = (r: LeaveRow) => canApprove && (role === 'manager' ? r.stage === 'manager' : role === 'owner' || role === 'hr');
   return (
     <div>
       <PageHead title="Leave Approvals" sub={`${pendingCount} request${pendingCount === 1 ? '' : 's'} awaiting action`} />
@@ -451,7 +453,7 @@ function Approvals({ leave, role, canApprove, onDecide }: { leave: LeaveRow[]; r
                 canDecideRequest(r) && (
                   <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
                     <button onClick={() => onDecide(r, 'reject')} style={{ flex: 1, height: 42, borderRadius: 11, border: '1.5px solid var(--red)', background: 'var(--panel)', color: 'var(--red)', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><AIcon name="x" size={17} color="var(--red)" sw={2.2} />Reject</button>
-                    <button onClick={() => onDecide(r, 'approve')} style={{ flex: 1.6, height: 42, borderRadius: 11, border: 'none', background: 'var(--green)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><AIcon name="check" size={17} color="#fff" sw={2.4} />{r.stage === 'manager' ? 'Approve → HR' : 'Approve'}</button>
+                    <button onClick={() => onDecide(r, 'approve')} style={{ flex: 1.6, height: 42, borderRadius: 11, border: 'none', background: 'var(--green)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><AIcon name="check" size={17} color="#fff" sw={2.4} />{role === 'manager' && r.stage === 'manager' ? 'Approve → HR' : 'Approve'}</button>
                   </div>
                 )
               ) : (
