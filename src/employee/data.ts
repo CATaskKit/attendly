@@ -5,6 +5,7 @@ import type { AttendanceAudit } from '../lib/attendanceAudit';
 export type ReimbursementDraft = { category: string; amount: number; spentOn: string; reason: string; files: File[] };
 
 export type LeaveRequest = {
+  id?: string;
   type: string;
   from: string;
   to: string;
@@ -58,6 +59,8 @@ export type Ctx = {
   live: boolean;
   employee: Employee | null;
   employeeName: string;
+  workspaceName: string;
+  workspaceLogo: string | null;
   attendanceRows: AttendanceRow[];
   leaveBalances: LeaveBalance[];
   holidays: Holiday[];
@@ -73,6 +76,7 @@ export type Ctx = {
   doCheckIn: (audit?: AttendanceAudit) => void;
   doCheckOut: () => void;
   submitLeave: (l: Omit<LeaveRequest, 'status' | 'mgr'> & { fromDate?: string; toDate?: string; reason?: string; attachment?: string | null }) => void;
+  cancelLeave: (id: string) => void;
   teamRequests: TeamRequest[];
   approveTeam: (id: string) => void;
   rejectTeam: (id: string) => void;
@@ -86,6 +90,7 @@ export type Ctx = {
   reimbursements: Reimbursement[];
   reimbursementEnabled: boolean;
   submitReimbursement: (draft: ReimbursementDraft) => void;
+  cancelReimbursement: (id: string) => void;
   announcements: Announcement[];
   unreadAnnouncements: number;
   isAnnouncementRead: (id: string) => boolean;

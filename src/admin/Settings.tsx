@@ -1,6 +1,6 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode, type ChangeEvent } from 'react';
 import { AIcon, ACard, APill, BtnPrimary, BtnGhost, PageHead, Spinner } from './ui';
-import { getOrganization, updateOrganization, getOrganizationSettings, setOrganizationSetting } from '../lib/api';
+import { getOrganization, updateOrganization, getOrganizationSettings, setOrganizationSetting, uploadOrgLogo } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { getLocation } from '../lib/attendanceAudit';
 
@@ -104,6 +104,8 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
   const [cfg, setCfg] = useState({ name: '', industry: 'Software / IT', country: 'India', tz: 'Asia/Kolkata', currency: 'INR' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const upd = (k: keyof typeof cfg, v: string) => setCfg((c) => ({ ...c, [k]: v }));
 
   useEffect(() => {
@@ -111,8 +113,36 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
     getOrganization(orgId).then((o) => {
       if (!o) return;
       setCfg({ name: o.display_name || o.name, industry: o.industry || 'Software / IT', country: o.country || 'India', tz: o.timezone || 'Asia/Kolkata', currency: o.currency || 'INR' });
+      setLogoUrl(o.logo_url ?? null);
     }).catch(console.error).finally(() => setLoading(false));
   }, [orgId]);
+
+  const onPickLogo = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !orgId) return;
+    if (!file.type.startsWith('image/')) { notify('Please choose an image file', 'red', 'xCircle'); return; }
+    if (file.size > 2 * 1024 * 1024) { notify('Logo must be under 2 MB', 'red', 'xCircle'); return; }
+    setUploadingLogo(true);
+    try {
+      const url = await uploadOrgLogo(orgId, file);
+      await updateOrganization(orgId, { logo_url: url });
+      setLogoUrl(url);
+      notify('Workspace logo updated');
+    } catch (err) { console.error(err); notify('Could not upload logo', 'red', 'xCircle'); }
+    finally { setUploadingLogo(false); }
+  };
+
+  const removeLogo = async () => {
+    if (!orgId) { setLogoUrl(null); return; }
+    setUploadingLogo(true);
+    try {
+      await updateOrganization(orgId, { logo_url: null });
+      setLogoUrl(null);
+      notify('Workspace logo removed');
+    } catch (err) { console.error(err); notify('Could not remove logo', 'red', 'xCircle'); }
+    finally { setUploadingLogo(false); }
+  };
 
   const save = async () => {
     if (!orgId) { notify('Company profile saved'); return; }
@@ -133,8 +163,28 @@ function CompanySettings({ orgId, canManage, notify }: SectionProps) {
         <Field label="Country"><SSelect value={cfg.country} onChange={(v) => upd('country', v)} options={['India', 'United States', 'United Kingdom', 'Singapore', 'UAE']} /></Field>
         <Field label="Currency"><SSelect value={cfg.currency} onChange={(v) => upd('currency', v)} options={['INR', 'USD', 'GBP', 'SGD', 'AED']} /></Field>
       </div>
-      <SettingItem label="Timezone" desc="Used for attendance timestamps and reports." last>
+      <SettingItem label="Timezone" desc="Used for attendance timestamps and reports.">
         <div style={{ width: 240 }}><SSelect value={cfg.tz} onChange={(v) => upd('tz', v)} options={['Asia/Kolkata', 'Asia/Dubai', 'Europe/London', 'America/New_York', 'Asia/Singapore']} /></div>
+      </SettingItem>
+      <SettingItem label="Workspace logo" desc="Shown to employees in the mobile app, alongside the workspace name." last>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 12, border: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+            {logoUrl
+              ? <img src={logoUrl} alt="Workspace logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              : <AIcon name="building" />}
+          </div>
+          {canManage && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <label style={{ cursor: uploadingLogo ? 'default' : 'pointer' }}>
+                <input type="file" accept="image/*" onChange={onPickLogo} disabled={uploadingLogo} style={{ display: 'none' }} />
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 38, padding: '0 14px', borderRadius: 10, border: '1px solid var(--line)', background: 'var(--panel)', fontSize: 13, fontWeight: 600, color: 'var(--ink-1)', opacity: uploadingLogo ? 0.6 : 1 }}>
+                  <AIcon name="arrowUp" />{uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace' : 'Upload logo'}
+                </span>
+              </label>
+              {logoUrl && <BtnGhost icon="trash" onClick={removeLogo} disabled={uploadingLogo}>Remove</BtnGhost>}
+            </div>
+          )}
+        </div>
       </SettingItem>
     </SCard>
   );

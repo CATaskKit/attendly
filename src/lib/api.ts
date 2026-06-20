@@ -165,7 +165,7 @@ export async function listLeaveTypes(): Promise<LeaveType[]> {
 }
 
 // ── Organization + onboarding writes ──────────────────────────────────
-export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean; reimbursement_disabled?: boolean; weekend_days?: number[] | null; weekend_sat_alt?: string | null; shift_start?: string | null; shift_end?: string | null; late_grace_min?: number | null };
+export type OrgRow = { id: string; name: string; display_name: string | null; industry: string | null; country: string | null; timezone: string | null; currency: string | null; plan: string; reimbursement_enabled?: boolean; reimbursement_require_manager?: boolean; reimbursement_disabled?: boolean; weekend_days?: number[] | null; weekend_sat_alt?: string | null; shift_start?: string | null; shift_end?: string | null; late_grace_min?: number | null; logo_url?: string | null };
 
 export async function getOrganization(orgId: string): Promise<OrgRow | null> {
   const { data, error } = await db().from('organizations').select('*').eq('id', orgId).single();
@@ -195,6 +195,15 @@ export async function setOrganizationSetting(orgId: string, key: string, value: 
 export async function setEmployeeBasicSalary(employeeId: string, value: number): Promise<void> {
   const { error } = await db().from('employees').update({ basic_salary: value }).eq('id', employeeId);
   if (error) throw error;
+}
+
+/** Upload a workspace logo to the public 'branding' bucket; returns its public URL. */
+export async function uploadOrgLogo(orgId: string, file: File): Promise<string> {
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+  const path = `${orgId}/logo-${Date.now()}.${ext}`;
+  const { error } = await db().storage.from('branding').upload(path, file, { upsert: true, contentType: file.type || undefined });
+  if (error) throw error;
+  return db().storage.from('branding').getPublicUrl(path).data.publicUrl;
 }
 
 export async function addDepartments(orgId: string, names: string[]): Promise<void> {
@@ -315,6 +324,16 @@ export async function decideTeamLeave(row: LeaveRow, action: 'approve' | 'reject
   if (!rpc.error) return;
   if (!isMissingRpcError(rpc.error)) throw rpc.error;
   await decideLeave(row, action);
+}
+
+/** Employee withdraws their own still-pending leave (releases the pending balance). */
+export async function cancelLeave(id: string): Promise<void> {
+  const { data: row, error: readErr } = await db().from('leave_requests').select('*').eq('id', id).single();
+  if (readErr) throw readErr;
+  if (!row || row.status !== 'Pending') return;
+  const { error } = await db().from('leave_requests').update({ status: 'Cancelled', stage: 'reject' }).eq('id', id).eq('status', 'Pending');
+  if (error) throw error;
+  if (row.employee_id && row.org_id) await adjustLeaveBalance(row.org_id, row.employee_id, row.type, { pending: -num(row.days) });
 }
 
 // ── Dashboard stats ───────────────────────────────────────────────────
@@ -812,6 +831,12 @@ export async function markReimbursementsPaid(rows: Reimbursement[], ref?: string
   const { error } = await db().from('reimbursements')
     .update({ status: 'Paid', stage: 'done', paid_at: new Date().toISOString(), paid_by: uid, paid_ref: ref || null })
     .in('id', ids);
+  if (error) throw error;
+}
+
+/** Employee withdraws their own still-pending reimbursement claim. */
+export async function cancelReimbursement(id: string): Promise<void> {
+  const { error } = await db().from('reimbursements').update({ status: 'Cancelled', stage: 'done' }).eq('id', id).eq('status', 'Pending');
   if (error) throw error;
 }
 

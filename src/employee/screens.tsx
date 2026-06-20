@@ -3,6 +3,7 @@ import { Icon, Avatar, Card, Pill, StatusBadge } from './ui';
 import type { Ctx } from './data';
 import { useAuth } from '../lib/auth';
 import { getMyEmployee, type Employee } from '../lib/api';
+import { downloadSheets } from '../lib/export';
 import { APP_NAME, APP_VERSION } from '../lib/brand';
 
 // ── Schematic map placeholder (no real tiles) ────────────────────────
@@ -110,7 +111,7 @@ const heroBtn: CSSProperties = {
 
 // ─────────────────────── HOME / TODAY ────────────────────────────────
 export function HomeScreen({ ctx }: { ctx: Ctx }) {
-  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employee, employeeName, attendanceRows, leaveBalances, holidays, weeklyHours, live } = ctx;
+  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employee, employeeName, workspaceName, workspaceLogo, attendanceRows, leaveBalances, holidays, weeklyHours, live } = ctx;
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
   const fmtShort = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
@@ -135,6 +136,14 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
 
   return (
     <div>
+      {workspaceName && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '2px 2px 10px' }}>
+          {workspaceLogo
+            ? <img src={workspaceLogo} alt={workspaceName} style={{ width: 26, height: 26, borderRadius: 7, objectFit: 'contain', background: 'var(--card)' }} />
+            : <div style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>{workspaceName.charAt(0).toUpperCase()}</div>}
+          <span style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-2)', letterSpacing: '-0.01em' }}>{workspaceName}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 2px 18px' }}>
         <div>
           <div style={{ fontSize: 13, color: 'var(--text-3)', fontWeight: 600 }}>{greeting},</div>
@@ -340,9 +349,25 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
     { label: 'Absent', value: count('Absent'), tone: 'danger' },
     { label: 'Late', value: count('Late'), tone: 'warning' },
   ];
+  const exportMine = () => {
+    const rows = ctx.attendanceRows.map((r) => ({
+      Date: r.day,
+      'Check in': r.check_in_at ? new Date(r.check_in_at).toLocaleString() : '',
+      'Check out': r.check_out_at ? new Date(r.check_out_at).toLocaleString() : '',
+      Hours: r.work_seconds ? Number((r.work_seconds / 3600).toFixed(2)) : 0,
+      Status: r.status, Location: r.location || '',
+    }));
+    if (!rows.length) return;
+    downloadSheets(`My_Attendance_${ctx.now.toISOString().slice(0, 7)}.xlsx`, [{ name: 'Attendance', rows }]);
+  };
   return (
     <div>
       <ScreenHeader title="Attendance" subtitle={ctx.now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} />
+      {ctx.live && ctx.attendanceRows.length > 0 && (
+        <button onClick={exportMine} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 12, height: 38, padding: '0 14px', borderRadius: 11, border: '1px solid var(--hair)', background: 'var(--card)', color: 'var(--accent)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+          <Icon name="upload" size={15} color="var(--accent)" /> Export my attendance (Excel)
+        </button>
+      )}
       <Card pad={16}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <div>

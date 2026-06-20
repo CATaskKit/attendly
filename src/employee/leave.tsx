@@ -56,7 +56,7 @@ export function LeaveScreen({ ctx }: { ctx: Ctx }) {
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle>Requests</SectionTitle>
-        {ctx.leaveRequests.map((r, i) => <LeaveRow key={i} r={r} />)}
+        {ctx.leaveRequests.map((r, i) => <LeaveRow key={r.id || i} r={r} onCancel={ctx.cancelLeave} />)}
       </div>
       <div style={{ height: 80 }} />
 
@@ -72,8 +72,9 @@ export function LeaveScreen({ ctx }: { ctx: Ctx }) {
   );
 }
 
-function LeaveRow({ r }: { r: LeaveRequest }) {
+function LeaveRow({ r, onCancel }: { r: LeaveRequest; onCancel?: (id: string) => void }) {
   const icon = LEAVE_ICON[r.type] || 'calendar';
+  const canCancel = r.status === 'Pending' && !!r.id && !!onCancel;
   return (
     <Card pad={14} style={{ marginBottom: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -93,6 +94,12 @@ function LeaveRow({ r }: { r: LeaveRequest }) {
         <Connector done={r.status === 'Approved'} />
         <Step label="HR" done={r.status === 'Approved'} active={r.status === 'Pending' && !!r.mgr} reject={r.status === 'Rejected' && r.rejectedBy === 'hr'} />
       </div>
+      {canCancel && (
+        <button onClick={() => { if (window.confirm('Withdraw this leave request?')) onCancel!(r.id!); }}
+          style={{ width: '100%', marginTop: 12, height: 40, borderRadius: 11, border: '1.5px solid var(--danger)', background: 'transparent', color: 'var(--danger)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
+          <Icon name="x" size={16} color="var(--danger)" strokeWidth={2.4} /> Cancel request
+        </button>
+      )}
     </Card>
   );
 }

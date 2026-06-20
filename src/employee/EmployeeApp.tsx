@@ -5,6 +5,7 @@ import {
   applyLeave, checkIn, checkOut, decideTeamLeave, decideLeave, listLeave, ensureMyEmployee, getTodayAttendance,
   listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
   applyReimbursement, myReimbursements, compOffEarned, getOrganizationSettings,
+  cancelLeave as apiCancelLeave, cancelReimbursement as apiCancelReimbursement,
   listAnnouncements, listAnnouncementReads, markAnnouncementRead,
   type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow, type Reimbursement, type Announcement,
 } from '../lib/api';
@@ -32,6 +33,7 @@ const displayDay = (value: string | null) => {
 function mapLeave(r: LeaveRow): LeaveRequest {
   const status: LeaveRequest['status'] = r.status === 'Approved' ? 'Approved' : r.status === 'Rejected' ? 'Rejected' : 'Pending';
   return {
+    id: r.id,
     type: r.type,
     from: displayDay(r.from_date),
     to: displayDay(r.to_date),
@@ -165,6 +167,7 @@ export default function EmployeeApp() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [readAnnIds, setReadAnnIds] = useState<Set<string>>(new Set());
   const [geo, setGeo] = useState<{ enabled: boolean; lat: number | null; lng: number | null; radius: number }>({ enabled: false, lat: null, lng: null, radius: 150 });
+  const [workspace, setWorkspace] = useState<{ name: string; logo: string | null }>({ name: '', logo: null });
   const [attendanceAudit, setAttendanceAudit] = useState<AttendanceAudit>(() => ({ location: null, ip: null, device: getDeviceInfo() }));
 
   const [tab, setTab] = useState('home');
@@ -244,6 +247,7 @@ export default function EmployeeApp() {
       setTeamRequests(approvals.map((r) => mapTeamLeave(r, role === 'manager')));
       setReimbursements(reimbRows);
       setReimbState({ enabled: billing ? reimbursementActive(billing) : false, requireManager: billing?.reimbursement_require_manager ?? true });
+      setWorkspace({ name: billing?.display_name || billing?.name || '', logo: billing?.logo_url ?? null });
       setAnnouncements(annRows);
       setReadAnnIds(new Set(annReads.map((r) => r.announcement_id)));
       if (today) setAttendanceAudit({ location: today.location, ip: today.ip, device: today.device || getDeviceInfo() });
@@ -288,6 +292,7 @@ export default function EmployeeApp() {
     setAnnouncements([]);
     setReadAnnIds(new Set());
     setGeo({ enabled: false, lat: null, lng: null, radius: 150 });
+    setWorkspace({ name: '', logo: null });
   }, [live]);
 
   const showToast = (text: string, icon = 'checkCircle') => {
@@ -312,7 +317,7 @@ export default function EmployeeApp() {
 
   const ctx: Ctx = {
     tab, setTab: changeTab, status, checkInTime, checkOutTime, elapsed, now, leaveRequests,
-    live, employee, employeeName: empName, attendanceRows, leaveBalances, holidays, weeklyHours: weeklyHours(attendanceRows),
+    live, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weeklyHours: weeklyHours(attendanceRows),
     attendanceAudit, refreshAttendanceAudit,
     timeSynced: clock.synced, timeSource: clock.source,
     fmtClock, fmtDur,
@@ -375,6 +380,11 @@ export default function EmployeeApp() {
       setLeaveRequests((r) => [{ ...l, from: l.from || displayDay(fromDate), to: l.to || displayDay(toDate), status: 'Pending', mgr: false }, ...r]);
       setOverlay(null); showToast('Leave request submitted', 'leave');
     },
+    cancelLeave: (id) => {
+      if (!live) { showToast('Connect your workspace first', 'x'); return; }
+      apiCancelLeave(id).then(() => reloadLive()).then(() => showToast('Leave request withdrawn', 'leave'))
+        .catch((err) => { console.error(err); showToast('Could not withdraw request', 'x'); });
+    },
     teamRequests,
     approveTeam: (id) => {
       const row = teamRows.find((x) => x.id === id);
@@ -422,6 +432,11 @@ export default function EmployeeApp() {
         .then(() => reloadLive())
         .then(() => showToast('Reimbursement claim submitted', 'checkCircle'))
         .catch((err) => { console.error(err); showToast(err instanceof Error ? err.message : 'Could not submit claim', 'x'); void reloadLive(); });
+    },
+    cancelReimbursement: (id) => {
+      if (!live) { showToast('Connect your workspace first', 'x'); return; }
+      apiCancelReimbursement(id).then(() => reloadLive()).then(() => showToast('Claim withdrawn', 'checkCircle'))
+        .catch((err) => { console.error(err); showToast('Could not withdraw claim', 'x'); });
     },
     announcements,
     unreadAnnouncements: announcements.filter((a) => !readAnnIds.has(a.id)).length,
