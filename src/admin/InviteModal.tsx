@@ -2,9 +2,11 @@ import { useState, type ReactNode } from 'react';
 import { AIcon, APill, BtnGhost, BtnPrimary } from './ui';
 import { supabase } from '../lib/supabase';
 import type { Employee } from '../lib/api';
+import { SITE_URL } from '../lib/brand';
 
-// The live app origin — employees join from here (Login → "Join your workspace").
-const APP_URL = `${window.location.origin}${window.location.pathname}`;
+// The live app URL — employees join from here (Login → "Join your workspace").
+// Uses the configured SITE_URL so emailed links never point at localhost.
+const APP_URL = SITE_URL;
 
 function CopyRow({ label, value, onCopy }: { label: string; value: string; onCopy: () => void }) {
   return (

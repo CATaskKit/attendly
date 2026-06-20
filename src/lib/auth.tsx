@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabase';
+import { SITE_URL } from './brand';
 
 export type Role = 'owner' | 'hr' | 'manager' | 'employee';
 
@@ -146,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const sendPasswordReset: AuthContextValue['sendPasswordReset'] = async (email) => {
     if (!supabase) return { error: 'Connect Supabase to send password reset emails.' };
-    const resetUrl = `${window.location.origin}${window.location.pathname}?reset-password=1`;
+    const resetUrl = `${SITE_URL}/?reset-password=1`;
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
     return error ? { error: error.message } : {};
   };
