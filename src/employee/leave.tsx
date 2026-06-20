@@ -130,8 +130,8 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
       <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <Avatar name={ctx.employeeName} size={42} accent="var(--accent)" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>Your team</div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{teamCount ? `${teamCount} direct report${teamCount === 1 ? '' : 's'} with requests` : 'Direct reports'}</div>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>{ctx.role === 'manager' ? 'Your team' : 'Organization'}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{teamCount ? `${teamCount} ${ctx.role === 'manager' ? 'direct report' : 'employee'}${teamCount === 1 ? '' : 's'} with requests` : (ctx.role === 'manager' ? 'Direct reports' : 'All employees')}</div>
         </div>
         <Pill tone="accent"><Icon name="users" size={13} color="var(--accent)" />{teamCount}</Pill>
       </Card>
@@ -168,7 +168,7 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
             <Icon name="checkCircle" size={28} color="var(--success)" strokeWidth={2} />
           </div>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>No pending requests</div>
-          <div style={{ fontSize: 13, color: 'var(--text-3)' }}>New leave requests from your team will appear here.</div>
+          <div style={{ fontSize: 13, color: 'var(--text-3)' }}>New leave requests {ctx.role === 'manager' ? 'from your team' : 'across your organization'} will appear here.</div>
         </Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

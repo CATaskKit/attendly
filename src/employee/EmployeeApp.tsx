@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import {
-  applyLeave, checkIn, checkOut, decideTeamLeave, ensureMyEmployee, getTodayAttendance,
+  applyLeave, checkIn, checkOut, decideTeamLeave, decideLeave, listLeave, ensureMyEmployee, getTodayAttendance,
   listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
   applyReimbursement, myReimbursements, compOffEarned, getOrganizationSettings,
   listAnnouncements, listAnnouncementReads, markAnnouncementRead,
@@ -55,12 +55,14 @@ function relativeTime(value: string) {
   return days === 1 ? 'yesterday' : `${days}d ago`;
 }
 
-function mapTeamLeave(r: LeaveRow): TeamRequest {
+function mapTeamLeave(r: LeaveRow, asManager: boolean): TeamRequest {
   const today = isoDate(new Date());
+  // For a manager, an hr-stage request is out of their hands ("Forwarded").
+  // For HR/owner, an hr-stage (or any pending) request is theirs to action.
   const status: TeamRequest['status'] =
     r.status === 'Rejected' ? 'Rejected'
       : r.status === 'Approved' ? 'Approved'
-        : r.stage === 'hr' ? 'Forwarded'
+        : (asManager && r.stage === 'hr') ? 'Forwarded'
           : 'Pending';
   return {
     id: r.id,
@@ -149,7 +151,9 @@ export default function EmployeeApp() {
   const currentDay = isoDate(now);
   const t = DEFAULT_TWEAKS;
 
-  const canApproveTeam = role === 'manager';
+  // Managers approve their own team; HR/owner can approve across the org. All
+  // three get the in-app Approvals module.
+  const canApproveTeam = role === 'manager' || role === 'hr' || role === 'owner';
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [attendanceId, setAttendanceId] = useState<string | null>(null);
   const [attendanceRows, setAttendanceRows] = useState<AttendanceRow[]>([]);
@@ -214,7 +218,9 @@ export default function EmployeeApp() {
         myLeaveBalances(orgId, emp),
         listHolidays(),
         getTodayAttendance(orgId, emp, currentDay),
-        canApproveTeam ? listMyTeamLeave(profile, emp) : Promise.resolve([]),
+        role === 'manager' ? listMyTeamLeave(profile, emp)
+          : (role === 'hr' || role === 'owner') ? listLeave()
+          : Promise.resolve([]),
         myReimbursements().catch(() => [] as Reimbursement[]),
         fetchBilling(orgId).catch(() => null),
         listAnnouncements().catch(() => [] as Announcement[]),
@@ -235,7 +241,7 @@ export default function EmployeeApp() {
         : balances);
       setHolidays(holidayRows);
       setTeamRows(approvals);
-      setTeamRequests(approvals.map(mapTeamLeave));
+      setTeamRequests(approvals.map((r) => mapTeamLeave(r, role === 'manager')));
       setReimbursements(reimbRows);
       setReimbState({ enabled: billing ? reimbursementActive(billing) : false, requireManager: billing?.reimbursement_require_manager ?? true });
       setAnnouncements(annRows);
@@ -245,7 +251,7 @@ export default function EmployeeApp() {
     } catch (e) {
       console.error(e);
     }
-  }, [applyTodayState, canApproveTeam, currentDay, live, orgId, profile]);
+  }, [applyTodayState, canApproveTeam, role, currentDay, live, orgId, profile]);
 
   useEffect(() => { void reloadLive(); }, [reloadLive]);
   // Live updates: refresh when leave/attendance change for this tenant.
@@ -373,7 +379,9 @@ export default function EmployeeApp() {
     approveTeam: (id) => {
       const row = teamRows.find((x) => x.id === id);
       if (live && row) {
-        decideTeamLeave(row, 'approve').then(reloadLive).then(() => showToast(`${row.emp || 'Employee'} leave forwarded to HR`)).catch((err) => {
+        const decide = role === 'manager' ? decideTeamLeave : decideLeave;
+        const note = role === 'manager' && row.stage === 'manager' ? `${row.emp || 'Employee'} leave forwarded to HR` : `${row.emp || 'Employee'} leave approved`;
+        decide(row, 'approve').then(reloadLive).then(() => showToast(note)).catch((err) => {
           console.error(err);
           showToast(err instanceof Error ? err.message : 'Could not approve leave', 'x');
         });
@@ -386,7 +394,8 @@ export default function EmployeeApp() {
     rejectTeam: (id) => {
       const row = teamRows.find((x) => x.id === id);
       if (live && row) {
-        decideTeamLeave(row, 'reject').then(reloadLive).then(() => showToast(`${row.emp || 'Employee'} leave rejected`, 'x')).catch((err) => {
+        const decide = role === 'manager' ? decideTeamLeave : decideLeave;
+        decide(row, 'reject').then(reloadLive).then(() => showToast(`${row.emp || 'Employee'} leave rejected`, 'x')).catch((err) => {
           console.error(err);
           showToast(err instanceof Error ? err.message : 'Could not reject leave', 'x');
         });
