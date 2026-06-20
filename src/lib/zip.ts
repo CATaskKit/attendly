@@ -1,7 +1,9 @@
 import JSZip from 'jszip';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import type { Reimbursement } from './api';
 import { fmtINR } from './billing';
+import { styledSheet } from './export';
+import { saveFile, MIME } from './native';
 
 // Bundles a set of reimbursement claims into a .zip: every receipt file plus an
 // Excel summary, so HR can archive offline (records are retained ~2 years) and
@@ -47,21 +49,13 @@ export async function downloadReimbursementsZip(
     }
   }
 
-  // Excel summary at the root of the zip.
-  const ws = XLSX.utils.json_to_sheet(summary);
+  // Excel summary at the root of the zip (branded header, zebra rows, borders).
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Reimbursements');
+  XLSX.utils.book_append_sheet(wb, styledSheet(summary), 'Reimbursements');
   const xlsxArray = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
   zip.file('reimbursements-summary.xlsx', xlsxArray);
 
   const out = await zip.generateAsync({ type: 'blob' });
-  const a = document.createElement('a');
-  const href = URL.createObjectURL(out);
-  a.href = href;
-  a.download = `${filename}-${new Date().toISOString().slice(0, 10)}.zip`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(href), 4000);
+  await saveFile(`${filename}-${new Date().toISOString().slice(0, 10)}.zip`, out, MIME.zip);
   return { files, missing };
 }

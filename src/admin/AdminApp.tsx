@@ -710,12 +710,13 @@ function Reports({ orgId, onToast }: { orgId: string | null; onToast: (t: string
     setBusy(true);
     try {
       try {
-        // Prefer the server-side Edge Function (scales to large datasets)…
-        await downloadWorkbookServer(orgName);
-      } catch {
-        // …fall back to building it in the browser if it's not deployed.
+        // Build the fully-formatted workbook in the browser (branded headers,
+        // borders, zebra rows). Fine for normal org sizes.
         const d = await fetchExportData();
-        downloadWorkbook(d, orgName);
+        await downloadWorkbook(d, orgName);
+      } catch {
+        // Fall back to the server-side Edge Function for very large datasets.
+        await downloadWorkbookServer(orgName);
       }
       onToast('Workbook downloaded');
     } catch (e) { console.error(e); onToast('Export failed', 'red', 'xCircle'); }

@@ -349,7 +349,7 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
     { label: 'Absent', value: count('Absent'), tone: 'danger' },
     { label: 'Late', value: count('Late'), tone: 'warning' },
   ];
-  const exportMine = () => {
+  const exportMine = async () => {
     const rows = ctx.attendanceRows.map((r) => ({
       Date: r.day,
       'Check in': r.check_in_at ? new Date(r.check_in_at).toLocaleString() : '',
@@ -358,7 +358,8 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
       Status: r.status, Location: r.location || '',
     }));
     if (!rows.length) return;
-    downloadSheets(`My_Attendance_${ctx.now.toISOString().slice(0, 7)}.xlsx`, [{ name: 'Attendance', rows }]);
+    try { await downloadSheets(`My_Attendance_${ctx.now.toISOString().slice(0, 7)}.xlsx`, [{ name: 'Attendance', rows }]); }
+    catch (e) { console.error(e); }
   };
   return (
     <div>

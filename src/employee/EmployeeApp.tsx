@@ -18,6 +18,7 @@ import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
 import { collectAttendanceAudit, getDeviceInfo, locationMessage, distanceMeters, type AttendanceAudit } from '../lib/attendanceAudit';
 import { fetchNetworkTime, formatAppDate, APP_TIME_ZONE } from '../lib/networkTime';
+import { requestMediaPermissions } from '../lib/native';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
 import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen, AnnouncementsScreen } from './overlays';
@@ -256,6 +257,10 @@ export default function EmployeeApp() {
       console.error(e);
     }
   }, [applyTodayState, canApproveTeam, role, currentDay, live, orgId, profile]);
+
+  // Ask for camera + photo access once on native, so capturing/attaching
+  // receipts and saving exports works without a mid-action permission stall.
+  useEffect(() => { void requestMediaPermissions(); }, []);
 
   useEffect(() => { void reloadLive(); }, [reloadLive]);
   // Live updates: refresh when leave/attendance change for this tenant.

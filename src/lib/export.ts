@@ -1,5 +1,54 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { supabase } from './supabase';
+import { saveFile, MIME } from './native';
+
+// ── Excel styling ────────────────────────────────────────────────────
+// xlsx-js-style honours a `.s` style object on each cell. We give every
+// exported table a branded header row (Attendly blue), zebra-striped body,
+// thin borders and an auto-filter so the files look finished, not raw dumps.
+const THIN = { style: 'thin', color: { rgb: 'D9DEE7' } };
+const BORDERS = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+
+const HEADER_STYLE = {
+  font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } },
+  fill: { patternType: 'solid', fgColor: { rgb: '2563EB' } },
+  alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+  border: BORDERS,
+};
+const bodyStyle = (even: boolean) => ({
+  font: { sz: 10, color: { rgb: '1F2937' } },
+  fill: { patternType: 'solid', fgColor: { rgb: even ? 'F4F7FB' : 'FFFFFF' } },
+  alignment: { vertical: 'center' },
+  border: BORDERS,
+});
+
+// Apply the header + body styling, auto-filter and a taller header row to a
+// worksheet whose first row is the header. Mutates and returns the sheet.
+function styleTable(ws: XLSX.WorkSheet): XLSX.WorkSheet {
+  if (!ws['!ref']) return ws;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const addr = XLSX.utils.encode_cell({ r: R, c: C });
+      const cell = (ws[addr] ?? (ws[addr] = { t: 's', v: '' })) as XLSX.CellObject;
+      cell.s = R === range.s.r ? HEADER_STYLE : bodyStyle((R - range.s.r) % 2 === 0);
+    }
+  }
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: range.s, e: { r: range.s.r, c: range.e.c } }) };
+  const rows: XLSX.RowInfo[] = [{ hpt: 22 }];
+  ws['!rows'] = rows;
+  return ws;
+}
+
+// Build a styled worksheet from row objects (json). Empty → a plain note.
+function styledSheet(rows: Record<string, unknown>[]): XLSX.WorkSheet {
+  if (!rows.length) return XLSX.utils.aoa_to_sheet([['No records']]);
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = autoWidths(rows);
+  return styleTable(ws);
+}
+
+export { styledSheet };
 
 export type ExportData = {
   employees: Record<string, unknown>[];
@@ -68,30 +117,23 @@ export async function downloadWorkbookServer(orgName: string): Promise<void> {
   const blob = await res.blob();
   const stamp = new Date().toISOString().slice(0, 10);
   const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'Attendly';
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${safe}_HR_Export_${stamp}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
+  await saveFile(`${safe}_HR_Export_${stamp}.xlsx`, blob, MIME.xlsx);
 }
 
-/** Build & download a multi-sheet .xlsx from plain row arrays (client-side). */
-export function downloadSheets(filename: string, sheets: { name: string; rows: Record<string, unknown>[] }[]): void {
+/** Build & save a multi-sheet .xlsx from plain row arrays (client-side). */
+export async function downloadSheets(filename: string, sheets: { name: string; rows: Record<string, unknown>[] }[]): Promise<void> {
   const wb = XLSX.utils.book_new();
   for (const sh of sheets) {
-    const ws = sh.rows.length ? XLSX.utils.json_to_sheet(sh.rows) : XLSX.utils.aoa_to_sheet([['No records']]);
-    if (sh.rows.length) ws['!cols'] = autoWidths(sh.rows);
-    XLSX.utils.book_append_sheet(wb, ws, sh.name.slice(0, 31));
+    XLSX.utils.book_append_sheet(wb, styledSheet(sh.rows), sh.name.slice(0, 31));
   }
-  XLSX.writeFile(wb, filename, { compression: true });
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer;
+  await saveFile(filename, buf, MIME.xlsx);
 }
 
-export function downloadWorkbook(data: ExportData, orgName: string): void {
+export async function downloadWorkbook(data: ExportData, orgName: string): Promise<void> {
   const wb = XLSX.utils.book_new();
 
-  // Summary sheet
+  // Summary sheet — branded title banner + label/value rows.
   const summary = [
     ['Attendly · HR Data Export', ''],
     ['Organization', orgName],
@@ -105,16 +147,24 @@ export function downloadWorkbook(data: ExportData, orgName: string): void {
   ];
   const ws0 = XLSX.utils.aoa_to_sheet(summary);
   ws0['!cols'] = [{ wch: 26 }, { wch: 34 }];
+  ws0['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+  ws0['!rows'] = [{ hpt: 26 }];
+  const titleCell = ws0['A1'] as XLSX.CellObject;
+  titleCell.s = { font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '2563EB' } }, alignment: { horizontal: 'left', vertical: 'center' } };
+  for (let R = 1; R <= 8; R++) {
+    const label = ws0[`A${R + 1}`] as XLSX.CellObject | undefined;
+    if (label) label.s = { font: { bold: true, sz: 10, color: { rgb: '475569' } }, alignment: { vertical: 'center' } };
+    const value = ws0[`B${R + 1}`] as XLSX.CellObject | undefined;
+    if (value) value.s = { font: { sz: 10, color: { rgb: '1F2937' } }, alignment: { vertical: 'center' } };
+  }
   XLSX.utils.book_append_sheet(wb, ws0, 'Summary');
 
   for (const sheet of SHEETS) {
-    const rows = data[sheet.key];
-    const ws = rows.length ? XLSX.utils.json_to_sheet(rows) : XLSX.utils.aoa_to_sheet([['No records']]);
-    if (rows.length) ws['!cols'] = autoWidths(rows);
-    XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31));
+    XLSX.utils.book_append_sheet(wb, styledSheet(data[sheet.key]), sheet.name.slice(0, 31));
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
   const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'Attendly';
-  XLSX.writeFile(wb, `${safe}_HR_Export_${stamp}.xlsx`, { compression: true });
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer;
+  await saveFile(`${safe}_HR_Export_${stamp}.xlsx`, buf, MIME.xlsx);
 }

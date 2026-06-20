@@ -150,7 +150,7 @@ export function AttendanceMIS({ orgId, employees, leave, holidays, weekend, shif
           };
         });
       }
-      downloadSheets(`Attendance_${MONTH_LABEL.replace(/[^a-z0-9]+/gi, '_')}.xlsx`, [
+      await downloadSheets(`Attendance_${MONTH_LABEL.replace(/[^a-z0-9]+/gi, '_')}.xlsx`, [
         { name: 'Summary', rows: summaryRows },
         { name: 'Daily Log', rows: detailRows },
       ]);
@@ -239,14 +239,15 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
   const totalExtra = data.reduce((a, r) => a + r.extra, 0);
 
   const doProcess = () => { setProcessed(true); onToast(`Salary processed · ${inr(totalPayable)} queued for ${data.length} employees`); };
-  const exportXlsx = () => {
+  const exportXlsx = async () => {
     const rows = data.map((r) => ({
       Employee: r.e.name, Code: r.e.code, Department: r.e.dept || '',
       'Basic salary': Math.round(r.basic), 'Working days': totalDays, 'Paid days': r.paid,
       'LOP days': r.lop, 'Extra days': r.extra, 'LOP deduction': Math.round(r.deduction),
       Overtime: Math.round(r.overtime), 'Salary payable': Math.round(r.payable),
     }));
-    downloadSheets(`Payroll_${MONTH_LABEL.replace(/[^a-z0-9]+/gi, '_')}.xlsx`, [{ name: 'Payroll', rows }]);
+    try { await downloadSheets(`Payroll_${MONTH_LABEL.replace(/[^a-z0-9]+/gi, '_')}.xlsx`, [{ name: 'Payroll', rows }]); }
+    catch (e) { console.error(e); onToast('Export failed', 'red', 'xCircle'); }
   };
 
   return (
