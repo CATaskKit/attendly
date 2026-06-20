@@ -6,7 +6,7 @@ import {
   AIcon, AAvatar, ACard, APill, ABadge, KPI, Segmented, AToast, BtnGhost, BtnPrimary, PageHead, Spinner,
 } from './ui';
 import {
-  listEmployees, addEmployee, deleteEmployee, listLeave, decideLeave, listHolidays, addHoliday, deleteHoliday,
+  listEmployees, addEmployee, updateEmployee, deleteEmployee, listLeave, decideLeave, listHolidays, addHoliday, deleteHoliday,
   dashboardStats, hasEmployees, seedSampleData, getOrganization, updateOrganization, listReimbursements,
   listAnnouncements, listAnnouncementReads, listDepartments,
   type Employee, type LeaveRow, type Holiday, type Stats, type Reimbursement, type Announcement, type AnnouncementRead, type Dept,
@@ -129,6 +129,10 @@ export default function AdminApp() {
     }
     try { await addEmployee(orgId, e); await reload(); fire('Employee added'); }
     catch (err) { console.error(err); fire('Could not add employee', 'red', 'xCircle'); }
+  };
+  const onEditEmployee = async (id: string, e: Partial<Employee>) => {
+    try { await updateEmployee(id, e); await reload(); fire('Employee updated'); }
+    catch (err) { console.error(err); fire('Could not update employee', 'red', 'xCircle'); }
   };
   const onDeleteEmployee = async (id: string) => {
     try { await deleteEmployee(id); await reload(); fire('Employee removed', 'red', 'trash'); }
@@ -253,7 +257,7 @@ export default function AdminApp() {
             ) : page === 'approvals' ? (
               <Approvals leave={shownLeave} role={role} canApprove={canApproveLeave} onDecide={onDecide} />
             ) : page === 'employees' ? (
-              <Employees employees={shownEmployees} allEmployees={employees} departments={departments} canManage={canManageEmployees} onAdd={onAddEmployee} onImport={onImportEmployees} onDelete={onDeleteEmployee} onToast={fire} />
+              <Employees employees={shownEmployees} allEmployees={employees} departments={departments} canManage={canManageEmployees} onAdd={onAddEmployee} onEdit={onEditEmployee} onImport={onImportEmployees} onDelete={onDeleteEmployee} onToast={fire} />
             ) : page === 'holidays' ? (
               <Holidays holidays={shownHolidays} canManage={canManageHolidays} onAdd={onAddHoliday} onDelete={onDeleteHoliday} />
             ) : (
@@ -466,8 +470,9 @@ function Approvals({ leave, role, canApprove, onDecide }: { leave: LeaveRow[]; r
 
 // ── Employees ─────────────────────────────────────────────────────────
 const td: CSSProperties = { padding: '13px 18px', borderBottom: '1px solid var(--line)', fontSize: 13.5, color: 'var(--ink-2)', whiteSpace: 'nowrap' };
-function Employees({ employees, allEmployees, departments, canManage, onAdd, onImport, onDelete, onToast }: { employees: Employee[]; allEmployees: Employee[]; departments: Dept[]; canManage: boolean; onAdd: (e: Partial<Employee>) => void; onImport: (rows: ImportRow[]) => Promise<void> | void; onDelete: (id: string) => void; onToast: (t: string, tone?: string, icon?: string) => void }) {
+function Employees({ employees, allEmployees, departments, canManage, onAdd, onEdit, onImport, onDelete, onToast }: { employees: Employee[]; allEmployees: Employee[]; departments: Dept[]; canManage: boolean; onAdd: (e: Partial<Employee>) => void; onEdit: (id: string, e: Partial<Employee>) => void; onImport: (rows: ImportRow[]) => Promise<void> | void; onDelete: (id: string) => void; onToast: (t: string, tone?: string, icon?: string) => void }) {
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Employee | null>(null);
   const [importing, setImporting] = useState(false);
   const [inviting, setInviting] = useState<Employee | null>(null);
   const pendingInvites = allEmployees.filter((e) => e.email && !e.profile_id).length;
@@ -500,7 +505,12 @@ function Employees({ employees, allEmployees, departments, canManage, onAdd, onI
                         : <APill tone="amber"><AIcon name="inbox" size={12} />{e.email ? 'Invite' : 'No email'}</APill>}
                     </button>
                   </td>
-                  <td style={{ ...td, textAlign: 'right' }}>{canManage && <button onClick={() => onDelete(e.id)} title="Remove" style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 6 }}><AIcon name="trash" size={17} color="var(--ink-3)" /></button>}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{canManage && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <button onClick={() => setEditing(e)} title="Edit" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, padding: '0 11px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}><AIcon name="settings" size={14} color="var(--ink-3)" />Edit</button>
+                      <button onClick={() => onDelete(e.id)} title="Remove" style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 6 }}><AIcon name="trash" size={17} color="var(--ink-3)" /></button>
+                    </div>
+                  )}</td>
                 </tr>
                 );
               })}
@@ -509,14 +519,18 @@ function Employees({ employees, allEmployees, departments, canManage, onAdd, onI
         </div>
       </ACard>
       {adding && <AddEmployeeModal departments={departments} employees={allEmployees} onClose={() => setAdding(false)} onSave={(e) => { onAdd(e); setAdding(false); }} />}
+      {editing && <AddEmployeeModal initial={editing} departments={departments} employees={allEmployees.filter((x) => x.id !== editing.id)} onClose={() => setEditing(null)} onSave={(e) => { onEdit(editing.id, e); setEditing(null); }} />}
       {importing && <EmployeeImport departments={departments} employees={allEmployees} onClose={() => setImporting(false)} onImport={async (rows) => { await onImport(rows); setImporting(false); }} />}
       {inviting && <InviteModal employee={inviting} canManage={canManage} onClose={() => setInviting(null)} onToast={onToast} />}
     </div>
   );
 }
 
-function AddEmployeeModal({ departments, employees, onClose, onSave }: { departments: Dept[]; employees: Employee[]; onClose: () => void; onSave: (e: Partial<Employee>) => void }) {
-  const [f, setF] = useState<Partial<Employee>>({ code: '', name: '', dept: '', designation: '', manager: '', type: 'Full-time', status: 'Active', email: '', phone: '' });
+function AddEmployeeModal({ departments, employees, initial, onClose, onSave }: { departments: Dept[]; employees: Employee[]; initial?: Employee | null; onClose: () => void; onSave: (e: Partial<Employee>) => void }) {
+  const isEdit = !!initial;
+  const [f, setF] = useState<Partial<Employee>>(initial
+    ? { code: initial.code, name: initial.name, dept: initial.dept ?? '', designation: initial.designation ?? '', manager: initial.manager ?? '', type: initial.type ?? 'Full-time', status: initial.status || 'Active', email: initial.email ?? '', phone: initial.phone ?? '' }
+    : { code: '', name: '', dept: '', designation: '', manager: '', type: 'Full-time', status: 'Active', email: '', phone: '' });
   const u = (k: keyof Employee, v: string) => setF((s) => ({ ...s, [k]: v }));
   const input: CSSProperties = { width: '100%', boxSizing: 'border-box', height: 42, borderRadius: 10, border: '1px solid var(--line)', padding: '0 12px', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink-1)', outline: 'none' };
   const lbl: CSSProperties = { display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink-2)', marginBottom: 6 };
@@ -525,7 +539,7 @@ function AddEmployeeModal({ departments, employees, onClose, onSave }: { departm
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(15,23,34,0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 520, maxWidth: '100%', background: 'var(--panel)', borderRadius: 18, boxShadow: '0 30px 80px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--line)' }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink-1)' }}>Add employee</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink-1)' }}>{isEdit ? 'Edit employee' : 'Add employee'}</div>
           <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: 'none', background: 'var(--soft)', cursor: 'pointer' }}><AIcon name="x" size={17} color="var(--ink-2)" /></button>
         </div>
         <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -551,10 +565,15 @@ function AddEmployeeModal({ departments, employees, onClose, onSave }: { departm
           </label>
           <label><span style={lbl}>Work email</span><input style={input} value={f.email || ''} onChange={(e) => u('email', e.target.value)} placeholder="name@company.com" /></label>
           <label><span style={lbl}>Phone</span><input style={input} value={f.phone || ''} onChange={(e) => u('phone', e.target.value)} placeholder="+91 …" /></label>
+          <label><span style={lbl}>Status</span>
+            <select style={{ ...input, appearance: 'none' }} value={f.status || 'Active'} onChange={(e) => u('status', e.target.value)}>
+              {['Active', 'Inactive'].map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </label>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, padding: '16px 24px', borderTop: '1px solid var(--line)', background: 'var(--bg)' }}>
           <BtnGhost onClick={onClose}>Cancel</BtnGhost>
-          <BtnPrimary icon="plus" onClick={save}>Add employee</BtnPrimary>
+          <BtnPrimary icon={isEdit ? 'check' : 'plus'} onClick={save}>{isEdit ? 'Save changes' : 'Add employee'}</BtnPrimary>
         </div>
       </div>
     </div>

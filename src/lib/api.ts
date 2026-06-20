@@ -89,6 +89,14 @@ export async function addEmployee(orgId: string, e: Partial<Employee>): Promise<
   if (error) throw error;
 }
 
+export async function updateEmployee(id: string, fields: Partial<Employee>): Promise<void> {
+  // Only persist editable columns (never id / org_id / profile_id / created_at).
+  const { code, name, dept, designation, manager, type, status, email, phone } = fields;
+  const patch = { code, name, dept, designation, manager, type, status, email, phone };
+  const { error } = await db().from('employees').update(patch).eq('id', id);
+  if (error) throw error;
+}
+
 export async function deleteEmployee(id: string): Promise<void> {
   const { error } = await db().from('employees').delete().eq('id', id);
   if (error) throw error;
