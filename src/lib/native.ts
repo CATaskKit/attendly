@@ -42,21 +42,25 @@ async function toBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Save a generated file (Excel, ZIP, …) to the device. On the web this is a
- * normal download; on native it writes to app storage and opens the share
- * sheet so the user can save it to Drive/Files/Downloads or send it on.
+ * Save a generated file (Excel, ZIP, …) straight to the device — no share sheet.
+ * On the web this is a normal browser download; on native it writes directly to
+ * the public Documents folder (visible in the Files app), falling back to
+ * app-private external storage if the OS doesn't allow the public write.
+ * Returns the saved location label (for a "Saved to …" message), if known.
  */
-export async function saveFile(filename: string, data: Blob | ArrayBuffer, mime: string): Promise<void> {
+export async function saveFile(filename: string, data: Blob | ArrayBuffer, mime: string): Promise<string | void> {
   const blob = data instanceof Blob ? data : new Blob([data], { type: mime });
   if (!isNative()) { browserDownload(filename, blob); return; }
   const { Filesystem, Directory } = await import('@capacitor/filesystem');
-  const { Share } = await import('@capacitor/share');
   const base64 = await toBase64(blob);
-  const written = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
   try {
-    await Share.share({ title: filename, url: written.uri });
+    await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Documents, recursive: true });
+    return 'Documents';
   } catch {
-    // User dismissed the share sheet — the file is still saved in app storage.
+    // Some Android versions restrict the public Documents folder — keep the file
+    // on the device in app storage instead (accessible from a file manager).
+    await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.External, recursive: true });
+    return 'app storage';
   }
 }
 

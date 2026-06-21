@@ -709,16 +709,17 @@ function Reports({ orgId, onToast }: { orgId: string | null; onToast: (t: string
   const onDownload = async () => {
     setBusy(true);
     try {
+      let savedTo: string | void;
       try {
         // Build the fully-formatted workbook in the browser (branded headers,
         // borders, zebra rows). Fine for normal org sizes.
         const d = await fetchExportData();
-        await downloadWorkbook(d, orgName);
+        savedTo = await downloadWorkbook(d, orgName);
       } catch {
         // Fall back to the server-side Edge Function for very large datasets.
-        await downloadWorkbookServer(orgName);
+        savedTo = await downloadWorkbookServer(orgName);
       }
-      onToast('Workbook downloaded');
+      onToast(savedTo ? `Saved to ${savedTo}` : 'Workbook downloaded');
     } catch (e) { console.error(e); onToast('Export failed', 'red', 'xCircle'); }
     finally { setBusy(false); }
   };

@@ -103,7 +103,7 @@ function autoWidths(rows: Record<string, unknown>[]): { wch: number }[] {
  * exports off the browser. Throws if the function isn't deployed/reachable, so
  * callers can fall back to the client-side build.
  */
-export async function downloadWorkbookServer(orgName: string): Promise<void> {
+export async function downloadWorkbookServer(orgName: string): Promise<string | void> {
   if (!supabase) throw new Error('Supabase not configured');
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
@@ -117,20 +117,20 @@ export async function downloadWorkbookServer(orgName: string): Promise<void> {
   const blob = await res.blob();
   const stamp = new Date().toISOString().slice(0, 10);
   const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'Attendly';
-  await saveFile(`${safe}_HR_Export_${stamp}.xlsx`, blob, MIME.xlsx);
+  return saveFile(`${safe}_HR_Export_${stamp}.xlsx`, blob, MIME.xlsx);
 }
 
 /** Build & save a multi-sheet .xlsx from plain row arrays (client-side). */
-export async function downloadSheets(filename: string, sheets: { name: string; rows: Record<string, unknown>[] }[]): Promise<void> {
+export async function downloadSheets(filename: string, sheets: { name: string; rows: Record<string, unknown>[] }[]): Promise<string | void> {
   const wb = XLSX.utils.book_new();
   for (const sh of sheets) {
     XLSX.utils.book_append_sheet(wb, styledSheet(sh.rows), sh.name.slice(0, 31));
   }
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer;
-  await saveFile(filename, buf, MIME.xlsx);
+  return saveFile(filename, buf, MIME.xlsx);
 }
 
-export async function downloadWorkbook(data: ExportData, orgName: string): Promise<void> {
+export async function downloadWorkbook(data: ExportData, orgName: string): Promise<string | void> {
   const wb = XLSX.utils.book_new();
 
   // Summary sheet — branded title banner + label/value rows.
@@ -166,5 +166,5 @@ export async function downloadWorkbook(data: ExportData, orgName: string): Promi
   const stamp = new Date().toISOString().slice(0, 10);
   const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'Attendly';
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer;
-  await saveFile(`${safe}_HR_Export_${stamp}.xlsx`, buf, MIME.xlsx);
+  return saveFile(`${safe}_HR_Export_${stamp}.xlsx`, buf, MIME.xlsx);
 }
