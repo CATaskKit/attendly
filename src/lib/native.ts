@@ -53,14 +53,22 @@ export async function saveFile(filename: string, data: Blob | ArrayBuffer, mime:
   if (!isNative()) { browserDownload(filename, blob); return; }
   const { Filesystem, Directory } = await import('@capacitor/filesystem');
   const base64 = await toBase64(blob);
+  // 1) Preferred: the phone's public Download folder (local storage, visible in
+  //    Files / Downloads). Needs storage permission on older Android.
   try {
-    await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Documents, recursive: true });
-    return 'Documents';
+    try { await Filesystem.requestPermissions(); } catch { /* perm not needed on this OS */ }
+    await Filesystem.writeFile({ path: `Download/${filename}`, data: base64, directory: Directory.ExternalStorage, recursive: true });
+    return 'Downloads';
   } catch {
-    // Some Android versions restrict the public Documents folder — keep the file
-    // on the device in app storage instead (accessible from a file manager).
-    await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.External, recursive: true });
-    return 'app storage';
+    // 2) Public Documents folder (no permission on most versions).
+    try {
+      await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Documents, recursive: true });
+      return 'Documents';
+    } catch {
+      // 3) App-private external storage — always works, found via a file manager.
+      await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.External, recursive: true });
+      return 'app storage';
+    }
   }
 }
 
