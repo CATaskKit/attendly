@@ -76,3 +76,19 @@ export const MIME = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   zip: 'application/zip',
 };
+
+/**
+ * Open the device settings where the user can enable location for this app.
+ * Opens the app's permission/details page (where the Location toggle lives) on
+ * Android, and the app settings on iOS. No-op on the web (browsers can't open
+ * their own site-permission settings programmatically).
+ */
+export async function openLocationSettings(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    const { NativeSettings, AndroidSettings, IOSSettings } = await import('capacitor-native-settings');
+    await NativeSettings.open({ optionAndroid: AndroidSettings.ApplicationDetails, optionIOS: IOSSettings.App });
+  } catch (e) {
+    console.warn('Could not open location settings', e);
+  }
+}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, Card, Pill, SlideToConfirm } from './ui';
 import { locationMessage } from '../lib/attendanceAudit';
+import { isNative, openLocationSettings } from '../lib/native';
 import { MapView, VRow, SelfieTile } from './screens';
 import type { Ctx } from './data';
 import { APP_NAME } from '../lib/brand';
@@ -61,9 +62,18 @@ export function CheckInScreen({ ctx }: { ctx: Ctx }) {
     <Overlay title="Check In" onClose={closeOverlay} footer={
       locationOk
         ? <SlideToConfirm label="Slide to check in" onConfirm={confirm} />
-        : <button onClick={retryLocation} disabled={loadingAudit} style={{ ...primaryBtn, opacity: loadingAudit ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9 }}>
-            <Icon name="mapPin" size={19} color="#fff" strokeWidth={2.2} />{loadingAudit ? 'Getting location…' : 'Enable location to check in'}
-          </button>
+        : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button onClick={retryLocation} disabled={loadingAudit} style={{ ...primaryBtn, opacity: loadingAudit ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9 }}>
+              <Icon name="mapPin" size={19} color="#fff" strokeWidth={2.2} />{loadingAudit ? 'Getting location…' : 'Enable location to check in'}
+            </button>
+            {isNative() && (
+              <button onClick={() => void openLocationSettings()} style={{ height: 40, borderRadius: 'var(--r-btn)', border: 'none', background: 'transparent', color: 'var(--accent)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
+                <Icon name="shield" size={16} color="var(--accent)" /> Open settings to turn on location
+              </button>
+            )}
+          </div>
+        )
     }>
       <MapView height={148} label={audit.location || 'Current device location'} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, background: locationOk ? 'var(--success-soft)' : 'var(--warning-soft)', borderRadius: 'var(--r-card)', padding: '11px 14px' }}>
