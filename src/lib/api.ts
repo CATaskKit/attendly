@@ -328,12 +328,10 @@ export async function decideTeamLeave(row: LeaveRow, action: 'approve' | 'reject
 
 /** Employee withdraws their own still-pending leave (releases the pending balance). */
 export async function cancelLeave(id: string): Promise<void> {
-  const { data: row, error: readErr } = await db().from('leave_requests').select('*').eq('id', id).single();
-  if (readErr) throw readErr;
-  if (!row || row.status !== 'Pending') return;
-  const { error } = await db().from('leave_requests').update({ status: 'Cancelled', stage: 'reject' }).eq('id', id).eq('status', 'Pending');
+  // Direct UPDATE is blocked by RLS for the requester (and the balance restore
+  // too), so withdraw via a security-definer RPC that handles both.
+  const { error } = await db().rpc('cancel_leave_request', { p_id: id });
   if (error) throw error;
-  if (row.employee_id && row.org_id) await adjustLeaveBalance(row.org_id, row.employee_id, row.type, { pending: -num(row.days) });
 }
 
 // ── Dashboard stats ───────────────────────────────────────────────────
