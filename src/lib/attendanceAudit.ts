@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { googleGeocode } from './maps';
 
 export type LocationError = 'denied' | 'unavailable' | 'timeout' | 'unsupported' | null;
 
@@ -73,10 +74,12 @@ function fmtCoords(latitude: number, longitude: number): string {
   return `${roundCoord(latitude)}, ${roundCoord(longitude)}`;
 }
 
-// Reverse-geocode lat/lng → a human place name ("Indiranagar, Bengaluru,
-// Karnataka"). Uses BigDataCloud's free, key-less, CORS-enabled client endpoint.
-// Best-effort with a short timeout; returns null on any failure.
+// Reverse-geocode lat/lng → a human place name. Prefers a full street address
+// from Google (when VITE_GOOGLE_MAPS_KEY is set), else BigDataCloud's free,
+// key-less, CORS-enabled client endpoint. Best-effort; returns null on failure.
 async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  const google = await googleGeocode(lat, lng);
+  if (google) return google;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);

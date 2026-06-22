@@ -75,7 +75,7 @@ export function CheckInScreen({ ctx }: { ctx: Ctx }) {
           </div>
         )
     }>
-      <MapView height={148} label={audit.location || 'Current device location'} />
+      <MapView height={148} label={audit.location || 'Current device location'} lat={audit.lat} lng={audit.lng} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, background: locationOk ? 'var(--success-soft)' : 'var(--warning-soft)', borderRadius: 'var(--r-card)', padding: '11px 14px' }}>
         <Icon name={locationOk ? 'shield' : 'mapPin'} size={22} color={locationOk ? 'var(--success)' : 'var(--warning)'} strokeWidth={2} />
         <div style={{ flex: 1 }}>
@@ -140,7 +140,7 @@ export function CheckOutScreen({ ctx }: { ctx: Ctx }) {
         <Card pad={14}><div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Shift</div><div style={{ fontSize: 20, fontWeight: 800, color: late ? 'var(--warning)' : 'var(--text-1)', marginTop: 4 }}>{late ? 'Late' : 'On time'}</div></Card>
       </div>
 
-      <div style={{ marginTop: 16 }}><MapView height={150} label={attendanceAudit.location || latestAudit?.location || 'Current device location'} /></div>
+      <div style={{ marginTop: 16 }}><MapView height={150} label={attendanceAudit.location || latestAudit?.location || 'Current device location'} lat={attendanceAudit.lat} lng={attendanceAudit.lng} /></div>
       <Card pad={16} style={{ marginTop: 14 }}>
         <VRow icon="clock" label="Clock" value={clockText} ok={timeSynced} />
         <div style={{ height: 1, background: 'var(--hair)' }} />

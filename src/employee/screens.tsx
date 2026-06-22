@@ -5,10 +5,27 @@ import { useAuth } from '../lib/auth';
 import { getMyEmployee, type Employee } from '../lib/api';
 import { downloadSheets } from '../lib/export';
 import { savedMessage } from '../lib/native';
+import { staticMapUrl } from '../lib/maps';
 import { APP_NAME, APP_VERSION } from '../lib/brand';
 
-// ── Schematic map placeholder (no real tiles) ────────────────────────
-export function MapView({ height = 190, label = 'Current device location' }: { height?: number; label?: string }) {
+// Map view — a real Google Static Map when a key + coordinates are available,
+// otherwise the schematic drawn map (no API key needed).
+export function MapView({ height = 190, label = 'Current device location', lat, lng }: { height?: number; label?: string; lat?: number | null; lng?: number | null }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const mapUrl = !imgFailed && lat != null && lng != null
+    ? staticMapUrl(lat, lng, { height: Math.min(640, Math.max(120, Math.round(height))) })
+    : null;
+  if (mapUrl) {
+    return (
+      <div style={{ position: 'relative', height, borderRadius: 'var(--r-card)', overflow: 'hidden', border: 'var(--card-border)', background: 'var(--map-bg)' }}>
+        <img src={mapUrl} alt="Check-in location map" onError={() => setImgFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <div style={{ position: 'absolute', left: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--card)', boxShadow: '0 2px 6px rgba(0,0,0,0.12)', padding: '6px 10px', borderRadius: 10, maxWidth: '80%' }}>
+          <Icon name="mapPin" size={14} color="var(--success)" />
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{
       position: 'relative', height, borderRadius: 'var(--r-card)', overflow: 'hidden',
