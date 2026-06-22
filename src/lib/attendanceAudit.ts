@@ -69,16 +69,49 @@ export async function getNetworkIp(): Promise<string | null> {
   }
 }
 
-function fmtLocation(latitude: number, longitude: number, accuracy: number): string {
-  return `${roundCoord(latitude)}, ${roundCoord(longitude)} (±${Math.round(accuracy)} m)`;
+function fmtCoords(latitude: number, longitude: number): string {
+  return `${roundCoord(latitude)}, ${roundCoord(longitude)}`;
+}
+
+// Reverse-geocode lat/lng → a human place name ("Indiranagar, Bengaluru,
+// Karnataka"). Uses BigDataCloud's free, key-less, CORS-enabled client endpoint.
+// Best-effort with a short timeout; returns null on any failure.
+async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+      { cache: 'no-store', signal: controller.signal },
+    );
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const d = (await res.json()) as { locality?: string; city?: string; principalSubdivision?: string; countryName?: string };
+    const parts = [d.locality, d.city, d.principalSubdivision]
+      .map((x) => (x || '').trim())
+      .filter(Boolean);
+    const name = Array.from(new Set(parts)).join(', ');
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
+// Builds the stored/displayed label: place name + coords when a name is found,
+// else coords + accuracy.
+async function buildLocationLabel(lat: number, lng: number, accuracy: number): Promise<string> {
+  const name = await reverseGeocode(lat, lng);
+  return name ? `${name} · ${fmtCoords(lat, lng)}` : `${fmtCoords(lat, lng)} (±${Math.round(accuracy)} m)`;
 }
 
 export type LocationResult = { label: string | null; error: LocationError; lat: number | null; lng: number | null };
 
 export async function getLocation(): Promise<LocationResult> {
-  // Native (Capacitor): use the Geolocation plugin so Android runtime location
-  // permissions are requested properly inside the installed app.
+  let coords: { lat: number; lng: number; accuracy: number } | null = null;
+
   if (Capacitor.isNativePlatform()) {
+    // Native (Capacitor): use the Geolocation plugin so Android runtime location
+    // permissions are requested properly inside the installed app.
     try {
       const { Geolocation } = await import('@capacitor/geolocation');
       let perm = await Geolocation.checkPermissions();
@@ -89,25 +122,26 @@ export async function getLocation(): Promise<LocationResult> {
         return { label: null, error: 'denied', lat: null, lng: null };
       }
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 12000 });
-      const { latitude, longitude, accuracy } = pos.coords;
-      return { label: fmtLocation(latitude, longitude, accuracy ?? 0), error: null, lat: latitude, lng: longitude };
+      coords = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy ?? 0 };
     } catch {
       return { label: null, error: 'unavailable', lat: null, lng: null };
     }
+  } else {
+    // Web: the standard geolocation API (HTTPS + the browser's permission prompt).
+    if (!navigator.geolocation) return { label: null, error: 'unsupported', lat: null, lng: null };
+    const r = await new Promise<{ lat: number; lng: number; accuracy: number } | { error: LocationError }>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+        (err) => resolve({ error: err.code === err.PERMISSION_DENIED ? 'denied' : err.code === err.TIMEOUT ? 'timeout' : 'unavailable' }),
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
+      );
+    });
+    if ('error' in r) return { label: null, error: r.error, lat: null, lng: null };
+    coords = r;
   }
 
-  // Web: the standard geolocation API (HTTPS + the browser's permission prompt).
-  if (!navigator.geolocation) return { label: null, error: 'unsupported', lat: null, lng: null };
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        resolve({ label: fmtLocation(latitude, longitude, accuracy), error: null, lat: latitude, lng: longitude });
-      },
-      (err) => resolve({ label: null, error: err.code === err.PERMISSION_DENIED ? 'denied' : err.code === err.TIMEOUT ? 'timeout' : 'unavailable', lat: null, lng: null }),
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
-    );
-  });
+  const label = await buildLocationLabel(coords.lat, coords.lng, coords.accuracy);
+  return { label, error: null, lat: coords.lat, lng: coords.lng };
 }
 
 export async function getLocationLabel(): Promise<string | null> {
