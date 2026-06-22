@@ -13,7 +13,7 @@ export async function downloadReimbursementsZip(
   rows: Reimbursement[],
   signedUrlFor: (path: string) => Promise<string | null>,
   filename = 'reimbursements',
-): Promise<{ files: number; missing: number }> {
+): Promise<{ files: number; missing: number; savedTo: string | void }> {
   const zip = new JSZip();
   const receipts = zip.folder('receipts')!;
   let files = 0;
@@ -56,6 +56,6 @@ export async function downloadReimbursementsZip(
   zip.file('reimbursements-summary.xlsx', xlsxArray);
 
   const out = await zip.generateAsync({ type: 'blob' });
-  await saveFile(`${filename}-${new Date().toISOString().slice(0, 10)}.zip`, out, MIME.zip);
-  return { files, missing };
+  const savedTo = await saveFile(`${filename}-${new Date().toISOString().slice(0, 10)}.zip`, out, MIME.zip);
+  return { files, missing, savedTo };
 }

@@ -98,6 +98,14 @@ export const MIME = {
   zip: 'application/zip',
 };
 
+/** Friendly "where did my file go" message from saveFile()'s returned location. */
+export function savedMessage(where: string | void): string {
+  if (where === 'Downloads') return 'Downloaded — check your Downloads folder';
+  if (where === 'Documents') return 'Saved — check your Documents folder (Files app)';
+  if (where) return 'Saved to the app’s files on your device';
+  return 'Download started — check your browser downloads';
+}
+
 /**
  * Open the device settings where the user can enable location for this app.
  * Opens the app's permission/details page (where the Location toggle lives) on

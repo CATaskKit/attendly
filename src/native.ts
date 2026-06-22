@@ -16,15 +16,7 @@ export async function initNative(): Promise<void> {
     /* status-bar plugin unavailable — ignore */
   }
 
-  try {
-    const { App } = await import('@capacitor/app');
-    // Android hardware back: go back in history, or exit at the root route.
-    App.addListener('backButton', ({ canGoBack }) => {
-      const atRoot = location.hash === '' || location.hash === '#/' || location.hash === '#';
-      if (canGoBack && !atRoot) window.history.back();
-      else App.exitApp();
-    });
-  } catch {
-    /* app plugin unavailable — ignore */
-  }
+  // Note: the Android hardware-back behaviour is handled inside the employee app
+  // (EmployeeApp) so it can be tab/overlay-aware: close an overlay → go to the
+  // Home tab → only then minimise the app (never exit straight to the OS).
 }

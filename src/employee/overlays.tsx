@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, Card, Pill, SlideToConfirm } from './ui';
 import { locationMessage } from '../lib/attendanceAudit';
-import { isNative, openLocationSettings } from '../lib/native';
+import { isNative, openLocationSettings, savedMessage } from '../lib/native';
 import { MapView, VRow, SelfieTile } from './screens';
 import type { Ctx } from './data';
 import { APP_NAME } from '../lib/brand';
@@ -315,7 +315,7 @@ function AttachRow({ file, onRemove }: { file: AttFile; onRemove: () => void }) 
   );
 }
 
-function UploadSheet({ attachments, onAdd, onRemove, onClose }: { attachments: AttFile[]; onAdd: (f: AttFile[]) => void; onRemove: (i: number) => void; onClose: () => void }) {
+function UploadSheet({ attachments, onAdd, onFiles, onRemove, onClose }: { attachments: AttFile[]; onAdd: (f: AttFile[]) => void; onFiles?: (files: File[]) => void; onRemove: (i: number) => void; onClose: () => void }) {
   const camRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -324,6 +324,7 @@ function UploadSheet({ attachments, onAdd, onRemove, onClose }: { attachments: A
   const ingest = (fileList: FileList | null) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
+    onFiles?.(files); // real File objects (for upload), when the caller needs them
     onAdd(files.map((f) => ({ name: f.name, size: f.size, kind: fileKind(f.name) })));
   };
 
@@ -521,17 +522,17 @@ export function ReimbursementsScreen({ ctx }: { ctx: Ctx }) {
   const [reason, setReason] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [downloading, setDownloading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const addFiles = (list: FileList | null) => { const fs = Array.from(list || []); if (fs.length) setFiles((a) => [...a, ...fs].slice(0, 8)); };
+  const [showUpload, setShowUpload] = useState(false);
   const amt = Number(amount) || 0;
   const canSubmit = reimbursementEnabled && amt > 0;
 
   const downloadMine = async () => {
     if (!reimbursements.length) return;
     setDownloading(true);
-    try { await downloadReimbursementsZip(reimbursements, signedReceiptUrl, 'my-reimbursements'); }
-    catch (e) { console.error(e); }
+    try {
+      const { savedTo } = await downloadReimbursementsZip(reimbursements, signedReceiptUrl, 'my-reimbursements');
+      ctx.notify(savedMessage(savedTo));
+    } catch (e) { console.error(e); ctx.notify('Could not download — try again', 'x'); }
     finally { setDownloading(false); }
   };
 
@@ -561,21 +562,30 @@ export function ReimbursementsScreen({ ctx }: { ctx: Ctx }) {
         <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="What was this expense for?" rows={3} style={{ width: '100%', boxSizing: 'border-box', resize: 'none', borderRadius: 'var(--r-card)', border: 'var(--card-border)', background: 'var(--card)', padding: 14, fontSize: 14.5, fontFamily: 'inherit', color: 'var(--text-1)', marginBottom: 18, outline: 'none' }} />
 
         <label style={fieldLabel}>Receipts <span style={{ color: 'var(--text-3)', fontWeight: 500 }}>· attach bills</span></label>
-        <input ref={fileRef} type="file" accept=".pdf,image/*" multiple style={{ display: 'none' }} onChange={(e) => addFiles(e.target.files)} />
         {files.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
             {files.map((f, i) => <AttachRow key={i} file={{ name: f.name, size: f.size, kind: fileKind(f.name) }} onRemove={() => setFiles((a) => a.filter((_, idx) => idx !== i))} />)}
           </div>
         )}
-        <button onClick={() => fileRef.current?.click()} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: 14, borderRadius: 'var(--r-card)', cursor: 'pointer', border: '1.5px dashed var(--hair)', background: 'var(--card)', textAlign: 'left' }}>
+        <button onClick={() => setShowUpload(true)} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: 14, borderRadius: 'var(--r-card)', cursor: 'pointer', border: '1.5px dashed var(--hair)', background: 'var(--card)', textAlign: 'left' }}>
           <div style={{ width: 38, height: 38, borderRadius: 11, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <Icon name={files.length ? 'plus' : 'upload'} size={20} color="var(--accent)" strokeWidth={2} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{files.length ? 'Add another receipt' : 'Upload a receipt'}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 1 }}>PDF, JPG or PNG · up to 8 files</div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 1 }}>Camera, photos or files · PDF, JPG, PNG · up to 8</div>
           </div>
         </button>
+
+        {showUpload && (
+          <UploadSheet
+            attachments={files.map((f) => ({ name: f.name, size: f.size, kind: fileKind(f.name) }))}
+            onAdd={() => { /* real files captured via onFiles below */ }}
+            onFiles={(fs) => setFiles((a) => [...a, ...fs].slice(0, 8))}
+            onRemove={(i) => setFiles((a) => a.filter((_, idx) => idx !== i))}
+            onClose={() => setShowUpload(false)}
+          />
+        )}
       </Overlay>
     );
   }

@@ -697,7 +697,7 @@ export type Notification = {
   id: string; type: string; title: string; body: string | null; read: boolean; created_at: string;
 };
 
-export async function listNotifications(limit = 30): Promise<Notification[]> {
+export async function listNotifications(limit = 200): Promise<Notification[]> {
   const { data, error } = await db().from('notifications')
     .select('id,type,title,body,read,created_at')
     .order('created_at', { ascending: false }).limit(limit);

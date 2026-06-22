@@ -4,6 +4,7 @@ import type { Ctx } from './data';
 import { useAuth } from '../lib/auth';
 import { getMyEmployee, type Employee } from '../lib/api';
 import { downloadSheets } from '../lib/export';
+import { savedMessage } from '../lib/native';
 import { APP_NAME, APP_VERSION } from '../lib/brand';
 
 // ── Schematic map placeholder (no real tiles) ────────────────────────
@@ -358,8 +359,10 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
       Status: r.status, Location: r.location || '',
     }));
     if (!rows.length) return;
-    try { await downloadSheets(`My_Attendance_${ctx.now.toISOString().slice(0, 7)}.xlsx`, [{ name: 'Attendance', rows }]); }
-    catch (e) { console.error(e); }
+    try {
+      const where = await downloadSheets(`My_Attendance_${ctx.now.toISOString().slice(0, 7)}.xlsx`, [{ name: 'Attendance', rows }]);
+      ctx.notify(savedMessage(where));
+    } catch (e) { console.error(e); ctx.notify('Could not export — try again', 'x'); }
   };
   return (
     <div>

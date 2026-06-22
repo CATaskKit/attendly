@@ -18,7 +18,7 @@ import { Toast } from './ui';
 import { DEFAULT_TWEAKS, themeVars } from './theme';
 import { collectAttendanceAudit, getDeviceInfo, locationMessage, distanceMeters, type AttendanceAudit } from '../lib/attendanceAudit';
 import { fetchNetworkTime, formatAppDate, APP_TIME_ZONE } from '../lib/networkTime';
-import { requestAppPermissions } from '../lib/native';
+import { requestAppPermissions, isNative } from '../lib/native';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
 import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen, AnnouncementsScreen } from './overlays';
@@ -173,6 +173,25 @@ export default function EmployeeApp() {
 
   const [tab, setTab] = useState('home');
   const [overlay, setOverlay] = useState<string | null>(null);
+
+  // Android hardware back: close an open overlay → return to the Home tab →
+  // only then minimise the app (send to background, never exit to the OS).
+  const tabRef = useRef(tab);
+  const overlayRef = useRef(overlay);
+  tabRef.current = tab;
+  overlayRef.current = overlay;
+  useEffect(() => {
+    if (!isNative()) return;
+    let handle: { remove: () => void } | undefined;
+    void import('@capacitor/app').then(({ App }) => {
+      void App.addListener('backButton', () => {
+        if (overlayRef.current) setOverlay(null);
+        else if (tabRef.current !== 'home') setTab('home');
+        else void App.minimizeApp();
+      }).then((h) => { handle = h; });
+    });
+    return () => { handle?.remove(); };
+  }, []);
   const [status, setStatus] = useState<Status>('out');
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
@@ -327,6 +346,7 @@ export default function EmployeeApp() {
     timeSynced: clock.synced, timeSource: clock.source,
     fmtClock, fmtDur,
     openOverlay: setOverlay, closeOverlay: () => setOverlay(null),
+    notify: (text: string, icon = 'checkCircle') => showToast(text, icon),
     doCheckIn: (audit = attendanceAudit) => {
       // Location is compulsory for an entry — block and prompt if it's missing.
       if (!audit.location) { showToast(locationMessage(audit.locationError ?? null), 'x'); return; }
