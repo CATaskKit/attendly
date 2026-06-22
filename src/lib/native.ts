@@ -21,6 +21,27 @@ export async function requestMediaPermissions(): Promise<void> {
   }
 }
 
+/**
+ * Ask up-front for everything the app uses: camera + photos (receipts/selfie),
+ * location (attendance check-in), and storage (saving exports). Each request is
+ * isolated so one denial doesn't stop the others. Safe to call repeatedly.
+ */
+export async function requestAppPermissions(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    const { Camera } = await import('@capacitor/camera');
+    await Camera.requestPermissions({ permissions: ['camera', 'photos'] });
+  } catch (e) { console.warn('Camera permission request failed', e); }
+  try {
+    const { Geolocation } = await import('@capacitor/geolocation');
+    await Geolocation.requestPermissions();
+  } catch (e) { console.warn('Location permission request failed', e); }
+  try {
+    const { Filesystem } = await import('@capacitor/filesystem');
+    await Filesystem.requestPermissions();
+  } catch (e) { console.warn('Storage permission request failed', e); }
+}
+
 function browserDownload(filename: string, blob: Blob): void {
   const href = URL.createObjectURL(blob);
   const a = document.createElement('a');

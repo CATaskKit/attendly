@@ -11,7 +11,7 @@ export type LeaveRequest = {
   to: string;
   half: boolean;
   days: number;
-  status: 'Pending' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
   mgr?: boolean;
   rejectedBy?: 'mgr' | 'hr';
 };

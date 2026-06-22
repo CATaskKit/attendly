@@ -364,11 +364,6 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
   return (
     <div>
       <ScreenHeader title="Attendance" subtitle={ctx.now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} />
-      {ctx.live && ctx.attendanceRows.length > 0 && (
-        <button onClick={exportMine} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 12, height: 38, padding: '0 14px', borderRadius: 11, border: '1px solid var(--hair)', background: 'var(--card)', color: 'var(--accent)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-          <Icon name="upload" size={15} color="var(--accent)" /> Export my attendance (Excel)
-        </button>
-      )}
       <Card pad={16}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <div>
@@ -393,7 +388,7 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
       </Card>
 
       <div style={{ marginTop: 22 }}>
-        <SectionTitle action="Export">Daily log</SectionTitle>
+        <SectionTitle action={ctx.live && ctx.attendanceRows.length > 0 ? 'Export' : undefined} onAction={() => void exportMine()}>Daily log</SectionTitle>
         <Card pad={0} style={{ overflow: 'hidden' }}>
           {log.length === 0 && <div style={{ padding: 18, color: 'var(--text-3)', fontSize: 13.5 }}>No attendance records yet.</div>}
           {log.map((e, i) => (
