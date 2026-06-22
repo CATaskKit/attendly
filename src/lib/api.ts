@@ -23,6 +23,7 @@ export type AttendanceRow = {
   id: string; org_id: string; employee_id: string | null; day: string; check_in_at: string | null;
   check_out_at: string | null; status: string; work_seconds: number | null; location: string | null;
   selfie_url: string | null; ip: string | null; device: string | null; created_at: string;
+  lat: number | null; lng: number | null;
 };
 
 export type Stats = {
@@ -45,7 +46,7 @@ function db() {
 const isoDate = (d: Date) => formatAppDate(d);
 const num = (value: unknown) => Number(value ?? 0);
 const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-type AttendanceDetails = Partial<Pick<AttendanceRow, 'location' | 'selfie_url' | 'ip' | 'device'>> & {
+type AttendanceDetails = Partial<Pick<AttendanceRow, 'location' | 'selfie_url' | 'ip' | 'device' | 'lat' | 'lng'>> & {
   checkedAt?: string;
 };
 
@@ -656,10 +657,13 @@ export async function checkIn(orgId: string, employee: Employee | null, details?
     selfie_url: details?.selfie_url ?? null,
     ip: details?.ip ?? null,
     device: details?.device ?? null,
+    lat: details?.lat ?? null,
+    lng: details?.lng ?? null,
   };
   const existing = await getTodayAttendance(orgId, employee, day);
   if (existing) {
-    const patch = Object.fromEntries(Object.entries(auditDetails).filter(([, value]) => value));
+    // Keep nulls out, but 0 is a valid coordinate — only drop null/undefined/''.
+    const patch = Object.fromEntries(Object.entries(auditDetails).filter(([, value]) => value !== null && value !== undefined && value !== ''));
     if (!Object.keys(patch).length) return existing;
     const { data, error } = await db().from('attendance').update(patch).eq('id', existing.id).select('*').single();
     if (error) throw error;

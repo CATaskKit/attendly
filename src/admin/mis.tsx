@@ -7,6 +7,7 @@ import { countExtraDays } from '../lib/compoff';
 import { countWorkingDays, type WeekendConfig } from '../lib/calendar';
 import { downloadSheets } from '../lib/export';
 import { lateThresholdMinutes, type ShiftPolicy } from '../lib/shift';
+import CheckinMapModal from './CheckinMapModal';
 
 // Restored from the original design handoff (admin-screens2.jsx). Both screens
 // are computed from live data: real employees + this month's attendance rows +
@@ -118,6 +119,7 @@ export function AttendanceMIS({ orgId, employees, leave, holidays, weekend, shif
   const sum = (k: 'present' | 'leave' | 'absent' | 'late' | 'extra') => data.reduce((a, r) => a + r[k], 0);
   const fmtHrs = (h: number) => `${Math.floor(h)}h ${String(Math.round((h % 1) * 60)).padStart(2, '0')}m`;
   const [exporting, setExporting] = useState(false);
+  const [mapEmp, setMapEmp] = useState<Employee | null>(null);
 
   // Full attendance report: a per-employee summary + a complete day-by-day log.
   const exportXlsx = async () => {
@@ -175,7 +177,7 @@ export function AttendanceMIS({ orgId, employees, leave, holidays, weekend, shif
             foot={<tr><td style={{ ...td, fontWeight: 800, color: 'var(--ink-1)', borderBottom: 'none' }} colSpan={2}>Total · {data.length} employees</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('present')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('leave')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('absent')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('late')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{sum('extra')}</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td></tr>}>
             {data.map((r) => (
               <tr key={r.e.id}>
-                <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><AAvatar name={r.e.name} size={32} /><div><div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-1)' }}>{r.e.name}</div><div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{r.e.code}</div></div></div></td>
+                <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><AAvatar name={r.e.name} size={32} /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-1)' }}>{r.e.name}</div><div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{r.e.code}</div></div><button onClick={() => setMapEmp(r.e)} title="View check-in locations on map" style={{ border: 'none', background: 'var(--soft)', borderRadius: 8, width: 28, height: 28, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><AIcon name="map" size={15} color="var(--accent)" /></button></div></td>
                 <td style={td}>{r.e.dept || '—'}</td>
                 <td style={tdNum}>{r.present}</td>
                 <td style={tdNum}>{r.leave}</td>
@@ -188,6 +190,7 @@ export function AttendanceMIS({ orgId, employees, leave, holidays, weekend, shif
           </TableShell>
         </>
       )}
+      {mapEmp && <CheckinMapModal employee={mapEmp} orgId={orgId} onClose={() => setMapEmp(null)} />}
     </div>
   );
 }

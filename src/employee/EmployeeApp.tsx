@@ -360,7 +360,7 @@ export default function EmployeeApp() {
         if (!localTime) { showToast('You are not connected to the internet', 'x'); return; }
         setCheckInTime(localTime); setCheckOutTime(null); setStatus('in'); setOverlay(null); showToast('Checked in at ' + fmtClock(localTime));
         if (live && orgId) {
-          checkIn(orgId, employee, { checkedAt: localTime.toISOString(), location: audit.location || undefined, ip: audit.ip || undefined, device: audit.device })
+          checkIn(orgId, employee, { checkedAt: localTime.toISOString(), location: audit.location || undefined, ip: audit.ip || undefined, device: audit.device, lat: audit.lat ?? undefined, lng: audit.lng ?? undefined })
             .then((row) => { setAttendanceId(row.id); setAttendanceRows((rows) => mergeAttendance(rows, row)); applyTodayState(row); })
             .catch(console.error);
         }
