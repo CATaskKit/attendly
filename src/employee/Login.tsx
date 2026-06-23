@@ -87,8 +87,12 @@ function LoginScreen() {
   // Show the set-new-password screen for a recovery link — either via the
   // ?reset-password=1 flag or the Supabase PASSWORD_RECOVERY event (robust even
   // if the redirect drops the query param).
-  const isResetLink = recovery || new URLSearchParams(window.location.search).has('reset-password');
-  const [mode, setMode] = useState<Mode>(isResetLink ? 'reset' : 'signin');
+  const params = new URLSearchParams(window.location.search);
+  const isResetLink = recovery || params.has('reset-password');
+  // Let the marketing site (cataskkit.in) deep-link straight to a form:
+  //   …/?signup=1 → create-workspace · …/?join=1 → join-workspace.
+  const initialMode: Mode = isResetLink ? 'reset' : params.has('signup') ? 'signup' : params.has('join') ? 'join' : 'signin';
+  const [mode, setMode] = useState<Mode>(initialMode);
   useEffect(() => { if (recovery) setMode('reset'); }, [recovery]);
   const [fullName, setFullName] = useState('');
   const [company, setCompany] = useState('');
@@ -307,11 +311,13 @@ function LoginScreen() {
             ) : isForgot || isReset ? (
               <>Remembered it? <button onClick={() => { setMode('signin'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Sign in</button></>
             ) : (
-              <>
-                <div>Invited by your team? <button onClick={() => { setMode('join'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Join your workspace</button></div>
-                <div style={{ marginTop: 6 }}>Setting up a new company? <button onClick={() => { setMode('signup'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Create a workspace</button></div>
-              </>
+              <div>Invited by your team? <button onClick={() => { setMode('join'); setFormError(null); setFormNotice(null); }} style={linkBtn}>Join your workspace</button></div>
             )}
+          </div>
+          <div style={{ textAlign: 'center', marginTop: 14 }}>
+            <a href="https://www.cataskkit.in" target="_blank" rel="noreferrer" style={brandLink}>
+              Visit www.cataskkit.in for more details →
+            </a>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 16, color: 'var(--text-3)' }}>
             <Icon name="shield" size={13} color="var(--text-3)" />
@@ -324,6 +330,8 @@ function LoginScreen() {
 }
 
 const linkBtn: CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--accent)', fontWeight: 700, fontSize: 13.5, fontFamily: 'inherit' };
+
+const brandLink: CSSProperties = { color: 'var(--accent)', fontWeight: 700, fontSize: 12.5, textDecoration: 'none', letterSpacing: '0.01em' };
 
 const loginStyles: Record<string, CSSProperties> = {
   fieldLabel: { display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8, letterSpacing: '0.01em' },
