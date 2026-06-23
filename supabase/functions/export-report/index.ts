@@ -5,7 +5,9 @@
 //
 // Deploy:  supabase functions deploy export-report
 // Invoke:  POST {SUPABASE_URL}/functions/v1/export-report  (Authorization: Bearer <user jwt>)
-import * as XLSX from 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
+// SheetJS only ships 0.19+ on cdn.sheetjs.com, which the Supabase deploy bundler
+// can't reach; npm (mirrored by esm.sh) tops out at 0.18.5, whose API we use.
+import * as XLSX from 'https://esm.sh/xlsx@0.18.5';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SHEETS = [
