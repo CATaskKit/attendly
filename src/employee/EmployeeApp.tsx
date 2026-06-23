@@ -159,6 +159,8 @@ export default function EmployeeApp() {
   // three get the in-app Approvals module.
   const canApproveTeam = role === 'manager' || role === 'hr' || role === 'owner';
   const [employee, setEmployee] = useState<Employee | null>(null);
+  // false until the first live data fetch settles — drives the home skeleton.
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [attendanceId, setAttendanceId] = useState<string | null>(null);
   const [attendanceRows, setAttendanceRows] = useState<AttendanceRow[]>([]);
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
@@ -278,6 +280,8 @@ export default function EmployeeApp() {
       applyTodayState(today);
     } catch (e) {
       console.error(e);
+    } finally {
+      setHasLoaded(true);
     }
   }, [applyTodayState, canApproveTeam, role, currentDay, live, orgId, profile]);
 
@@ -347,7 +351,7 @@ export default function EmployeeApp() {
 
   const ctx: Ctx = {
     tab, setTab: changeTab, status, checkInTime, checkOutTime, elapsed, now, leaveRequests,
-    live, configured, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weeklyHours: weeklyHours(attendanceRows),
+    live, configured, homeLoading: live && !hasLoaded, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weeklyHours: weeklyHours(attendanceRows),
     attendanceAudit, refreshAttendanceAudit,
     timeSynced: clock.synced, timeSource: clock.source,
     fmtClock, fmtDur,

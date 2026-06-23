@@ -3,7 +3,6 @@ import { Icon, Avatar, Card, Pill, StatusBadge } from './ui';
 import type { Ctx } from './data';
 import { useAuth } from '../lib/auth';
 import { getMyEmployee, type Employee } from '../lib/api';
-import { downloadSheets } from '../lib/export';
 import { savedMessage } from '../lib/native';
 import { staticMapUrl } from '../lib/maps';
 import { APP_NAME, APP_VERSION } from '../lib/brand';
@@ -127,9 +126,39 @@ const heroBtn: CSSProperties = {
   boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
 };
 
+// Shimmer placeholder shown on the Home tab while the first live fetch runs,
+// so the app feels responsive instead of flashing empty cards then data.
+function Sk({ h, w = '100%', r = 12, mt = 0 }: { h: number; w?: number | string; r?: number; mt?: number }) {
+  return <div style={{ height: h, width: w, borderRadius: r, marginTop: mt, background: 'var(--card)', animation: 'attSkeleton 1.2s ease-in-out infinite' }} />;
+}
+
+function HomeSkeleton() {
+  return (
+    <div>
+      <style>{'@keyframes attSkeleton{0%,100%{opacity:1}50%{opacity:.5}}'}</style>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 2px 18px' }}>
+        <div style={{ flex: 1 }}>
+          <Sk h={12} w={90} r={6} />
+          <Sk h={20} w={150} r={7} mt={8} />
+        </div>
+        <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--card)', animation: 'attSkeleton 1.2s ease-in-out infinite' }} />
+      </div>
+      <Sk h={172} r={26} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 14 }}>
+        <Sk h={84} /><Sk h={84} /><Sk h={84} />
+      </div>
+      <Sk h={16} w={120} r={6} mt={24} />
+      <Sk h={120} r={18} mt={12} />
+      <Sk h={64} r={14} mt={12} />
+      <Sk h={64} r={14} mt={10} />
+    </div>
+  );
+}
+
 // ─────────────────────── HOME / TODAY ────────────────────────────────
 export function HomeScreen({ ctx }: { ctx: Ctx }) {
-  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employee, employeeName, workspaceName, workspaceLogo, attendanceRows, leaveBalances, holidays, weeklyHours, live, configured } = ctx;
+  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employee, employeeName, workspaceName, workspaceLogo, attendanceRows, leaveBalances, holidays, weeklyHours, live, configured, homeLoading } = ctx;
+  if (homeLoading) return <HomeSkeleton />;
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
   const fmtShort = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
@@ -379,6 +408,9 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
     }));
     if (!rows.length) return;
     try {
+      // Load the xlsx-heavy export module on demand so it stays out of the
+      // initial app bundle (most sessions never export).
+      const { downloadSheets } = await import('../lib/export');
       const where = await downloadSheets(`My_Attendance_${ctx.now.toISOString().slice(0, 7)}.xlsx`, [{ name: 'Attendance', rows }]);
       ctx.notify(savedMessage(where));
     } catch (e) { console.error(e); ctx.notify('Could not export — try again', 'x'); }

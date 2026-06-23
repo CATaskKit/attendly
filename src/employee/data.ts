@@ -60,6 +60,8 @@ export type Ctx = {
   /** true on any real deployment (Supabase keys present), even before the
    *  profile/org loads — use this to suppress demo sample data. */
   configured: boolean;
+  /** true while the first live data fetch is in flight — show a skeleton. */
+  homeLoading: boolean;
   employee: Employee | null;
   employeeName: string;
   workspaceName: string;

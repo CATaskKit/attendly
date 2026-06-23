@@ -7,7 +7,6 @@ import type { Ctx } from './data';
 import { APP_NAME } from '../lib/brand';
 import { signedReceiptUrl } from '../lib/api';
 import { fmtINR } from '../lib/billing';
-import { downloadReimbursementsZip } from '../lib/zip';
 
 const fieldLabel: CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 9, letterSpacing: '0.01em' };
 const primaryBtn: CSSProperties = { width: '100%', height: 54, borderRadius: 'var(--r-btn)', border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 16, boxShadow: '0 6px 18px var(--accent-glow)' };
@@ -570,6 +569,8 @@ export function ReimbursementsScreen({ ctx }: { ctx: Ctx }) {
     if (!reimbursements.length) return;
     setDownloading(true);
     try {
+      // Load the zip/xlsx bundle on demand — keeps it out of the initial app load.
+      const { downloadReimbursementsZip } = await import('../lib/zip');
       const { savedTo } = await downloadReimbursementsZip(reimbursements, signedReceiptUrl, 'my-reimbursements');
       ctx.notify(savedMessage(savedTo));
     } catch (e) { console.error(e); ctx.notify('Could not download — try again', 'x'); }
