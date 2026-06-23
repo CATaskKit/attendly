@@ -13,7 +13,7 @@ const SHEETS = [
   { name: 'Leave Requests', table: 'leave_requests', cols: 'emp,code,dept,type,from_date,to_date,days,half,status,stage,reason,attachment,applied_at' },
   { name: 'Leave Balances', table: 'leave_balances', cols: 'code,name,type,allotted,used,pending' },
   { name: 'Departments', table: 'departments', cols: 'name,created_at' },
-  { name: 'Attendance', table: 'attendance', cols: 'day,check_in_at,check_out_at,status,work_seconds,location' },
+  { name: 'Attendance', table: 'attendance', cols: 'day,check_in_at,check_out_at,status,work_seconds,location,checkout_location' },
 ];
 
 const cors = {

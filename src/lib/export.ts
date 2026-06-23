@@ -80,7 +80,7 @@ export async function fetchExportData(): Promise<ExportData> {
     s.from('leave_requests').select('emp,code,dept,type,from_date,to_date,days,half,status,stage,reason,attachment,applied_at').order('applied_at', { ascending: false }),
     s.from('leave_balances').select('code,name,type,allotted,used,pending'),
     s.from('departments').select('name,created_at').order('name'),
-    s.from('attendance').select('day,check_in_at,check_out_at,status,work_seconds,location').order('day', { ascending: false }),
+    s.from('attendance').select('day,check_in_at,check_out_at,status,work_seconds,location,checkout_location').order('day', { ascending: false }),
   ]);
   for (const r of [emp, lv, bal, dep, att]) if (r.error) throw r.error;
   return {

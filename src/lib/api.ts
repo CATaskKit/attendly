@@ -24,6 +24,7 @@ export type AttendanceRow = {
   check_out_at: string | null; status: string; work_seconds: number | null; location: string | null;
   selfie_url: string | null; ip: string | null; device: string | null; created_at: string;
   lat: number | null; lng: number | null;
+  checkout_location: string | null; checkout_lat: number | null; checkout_lng: number | null;
 };
 
 export type Stats = {
@@ -683,14 +684,19 @@ export async function checkIn(orgId: string, employee: Employee | null, details?
 
 export async function checkOut(attendanceId: string, workSeconds: number, details?: AttendanceDetails): Promise<void> {
   const checkedAt = details?.checkedAt ? new Date(details.checkedAt) : new Date();
+  // Write the check-out location to its own columns so the check-in location
+  // (location/lat/lng) is preserved. 0 is a valid coordinate — only drop
+  // null/undefined/'' rather than all falsy values.
   const patch = {
     check_out_at: checkedAt.toISOString(),
     work_seconds: Math.round(workSeconds),
     ...Object.fromEntries(Object.entries({
-      location: details?.location,
+      checkout_location: details?.location,
+      checkout_lat: details?.lat,
+      checkout_lng: details?.lng,
       ip: details?.ip,
       device: details?.device,
-    }).filter(([, value]) => value)),
+    }).filter(([, value]) => value !== null && value !== undefined && value !== '')),
   };
   const { error } = await db().from('attendance').update(patch).eq('id', attendanceId);
   if (error) throw error;

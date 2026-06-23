@@ -75,7 +75,7 @@ export type Ctx = {
   closeOverlay: () => void;
   notify: (text: string, icon?: string) => void;
   doCheckIn: (audit?: AttendanceAudit) => void;
-  doCheckOut: () => void;
+  doCheckOut: (audit?: AttendanceAudit) => void;
   submitLeave: (l: Omit<LeaveRequest, 'status' | 'mgr'> & { fromDate?: string; toDate?: string; reason?: string; attachment?: string | null }) => void;
   cancelLeave: (id: string) => void;
   teamRequests: TeamRequest[];

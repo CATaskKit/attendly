@@ -367,12 +367,14 @@ export default function EmployeeApp() {
         }
       });
     },
-    doCheckOut: () => {
+    doCheckOut: (audit = attendanceAudit) => {
+      // Location is compulsory for check-out too — block and prompt if missing.
+      if (!audit.location) { showToast(locationMessage(audit.locationError ?? null), 'x'); return; }
       void getPunchTime().then((out) => {
         if (!out) { showToast('You are not connected to the internet', 'x'); return; }
         const seconds = checkInTime ? (out.getTime() - checkInTime.getTime()) / 1000 : 0;
         setCheckOutTime(out); setStatus('done'); setOverlay(null); showToast('Checked out at ' + fmtClock(out));
-        if (live && attendanceId) refreshAttendanceAudit().then((audit) => checkOut(attendanceId, seconds, { checkedAt: out.toISOString(), location: audit.location || undefined, ip: audit.ip || undefined, device: audit.device })).then(reloadLive).catch(console.error);
+        if (live && attendanceId) checkOut(attendanceId, seconds, { checkedAt: out.toISOString(), location: audit.location || undefined, ip: audit.ip || undefined, device: audit.device, lat: audit.lat ?? undefined, lng: audit.lng ?? undefined }).then(reloadLive).catch(console.error);
       });
     },
     submitLeave: (l) => {

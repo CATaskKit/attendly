@@ -112,14 +112,47 @@ export function CheckInScreen({ ctx }: { ctx: Ctx }) {
 
 // ── CHECK OUT ────────────────────────────────────────────────────────
 export function CheckOutScreen({ ctx }: { ctx: Ctx }) {
-  const { closeOverlay, doCheckOut, fmtClock, fmtDur, checkInTime, elapsed, now, attendanceAudit, attendanceRows, timeSynced } = ctx;
-  const latestAudit = attendanceRows[0];
+  const { closeOverlay, doCheckOut, fmtClock, fmtDur, checkInTime, elapsed, now, refreshAttendanceAudit, timeSynced } = ctx;
+  const [audit, setAudit] = useState(ctx.attendanceAudit);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingAudit(true);
+    refreshAttendanceAudit()
+      .then((next) => { if (active) setAudit(next); })
+      .finally(() => { if (active) setLoadingAudit(false); });
+    return () => { active = false; };
+  }, [refreshAttendanceAudit]);
+
+  const confirm = () => { void refreshAttendanceAudit().then((latest) => doCheckOut(latest)); };
+  const retryLocation = () => {
+    setLoadingAudit(true);
+    void refreshAttendanceAudit().then((next) => setAudit(next)).finally(() => setLoadingAudit(false));
+  };
+  const locationOk = !!audit.location;
+  const locationText = audit.location || (loadingAudit ? 'Detecting location...' : locationMessage(audit.locationError ?? null));
   const clockText = timeSynced ? 'Online synced' : 'Using device time';
   const fmtShort = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
   const overtimeSecs = Math.max(0, elapsed - 8 * 3600);
   const late = checkInTime ? (checkInTime.getHours() * 60 + checkInTime.getMinutes()) > 9 * 60 + 45 : false;
   return (
-    <Overlay title="Check Out" onClose={closeOverlay} footer={<SlideToConfirm label="Slide to check out" tone="var(--success)" icon="arrowRight" onConfirm={doCheckOut} />}>
+    <Overlay title="Check Out" onClose={closeOverlay} footer={
+      locationOk
+        ? <SlideToConfirm label="Slide to check out" tone="var(--success)" icon="arrowRight" onConfirm={confirm} />
+        : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button onClick={retryLocation} disabled={loadingAudit} style={{ ...primaryBtn, opacity: loadingAudit ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9 }}>
+              <Icon name="mapPin" size={19} color="#fff" strokeWidth={2.2} />{loadingAudit ? 'Getting location…' : 'Enable location to check out'}
+            </button>
+            {isNative() && (
+              <button onClick={() => void openLocationSettings()} style={{ height: 40, borderRadius: 'var(--r-btn)', border: 'none', background: 'transparent', color: 'var(--accent)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
+                <Icon name="shield" size={16} color="var(--accent)" /> Open settings to turn on location
+              </button>
+            )}
+          </div>
+        )
+    }>
       <div style={{ borderRadius: 'var(--r-hero)', padding: 20, background: 'var(--hero)', color: '#fff', boxShadow: 'var(--hero-shadow)' }}>
         <div style={{ fontSize: 12.5, opacity: 0.85 }}>Today's working time</div>
         <div style={{ fontSize: 46, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', lineHeight: 1.05 }}>{fmtDur(elapsed)}</div>
@@ -140,15 +173,22 @@ export function CheckOutScreen({ ctx }: { ctx: Ctx }) {
         <Card pad={14}><div style={{ fontSize: 12.5, color: 'var(--text-3)', fontWeight: 600 }}>Shift</div><div style={{ fontSize: 20, fontWeight: 800, color: late ? 'var(--warning)' : 'var(--text-1)', marginTop: 4 }}>{late ? 'Late' : 'On time'}</div></Card>
       </div>
 
-      <div style={{ marginTop: 16 }}><MapView height={150} label={attendanceAudit.location || latestAudit?.location || 'Current device location'} lat={attendanceAudit.lat} lng={attendanceAudit.lng} /></div>
+      <div style={{ marginTop: 16 }}><MapView height={150} label={audit.location || 'Current device location'} lat={audit.lat} lng={audit.lng} /></div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, background: locationOk ? 'var(--success-soft)' : 'var(--warning-soft)', borderRadius: 'var(--r-card)', padding: '11px 14px' }}>
+        <Icon name={locationOk ? 'shield' : 'mapPin'} size={22} color={locationOk ? 'var(--success)' : 'var(--warning)'} strokeWidth={2} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: locationOk ? 'var(--success)' : 'var(--warning)' }}>{locationOk ? 'Location captured' : loadingAudit ? 'Getting your location…' : 'Location required'}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{locationText}</div>
+        </div>
+      </div>
       <Card pad={16} style={{ marginTop: 14 }}>
         <VRow icon="clock" label="Clock" value={clockText} ok={timeSynced} />
         <div style={{ height: 1, background: 'var(--hair)' }} />
-        <VRow icon="mapPin" label="Check-out location" value={attendanceAudit.location || latestAudit?.location || 'Not captured'} ok={!!(attendanceAudit.location || latestAudit?.location)} />
+        <VRow icon="mapPin" label="Check-out location" value={locationText} ok={locationOk} />
         <div style={{ height: 1, background: 'var(--hair)' }} />
-        <VRow icon="wifi" label="Network IP" value={attendanceAudit.ip || latestAudit?.ip || 'Unavailable'} ok={!!(attendanceAudit.ip || latestAudit?.ip)} mono />
+        <VRow icon="wifi" label="Network IP" value={audit.ip || (loadingAudit ? 'Detecting IP...' : 'Unavailable')} ok={!!audit.ip} mono />
         <div style={{ height: 1, background: 'var(--hair)' }} />
-        <VRow icon="device" label="Device" value={attendanceAudit.device || latestAudit?.device || 'Unknown device'} />
+        <VRow icon="device" label="Device" value={audit.device} />
       </Card>
     </Overlay>
   );
