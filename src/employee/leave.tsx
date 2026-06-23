@@ -15,7 +15,7 @@ export function LeaveScreen({ ctx }: { ctx: Ctx }) {
   const tones = ['accent', 'warning', 'success', 'purple'];
   const iconFor = (name: string) => LEAVE_ICON[name] || 'calendar';
   const fmtDays = (days: number) => Number.isInteger(days) ? String(days) : days.toFixed(1);
-  const balances = ctx.live
+  const balances = ctx.configured
     ? ctx.leaveBalances.map((b, i) => ({ name: b.type, icon: iconFor(b.type), avail: b.available, total: b.allotted, tone: tones[i % tones.length] }))
     : fallback;
   const totalBalance = balances.reduce((sum, b) => sum + b.avail, 0);

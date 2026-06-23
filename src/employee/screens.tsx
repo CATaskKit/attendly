@@ -129,7 +129,7 @@ const heroBtn: CSSProperties = {
 
 // ─────────────────────── HOME / TODAY ────────────────────────────────
 export function HomeScreen({ ctx }: { ctx: Ctx }) {
-  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employee, employeeName, workspaceName, workspaceLogo, attendanceRows, leaveBalances, holidays, weeklyHours, live } = ctx;
+  const { status, checkInTime, checkOutTime, elapsed, fmtClock, fmtDur, openOverlay, now, employee, employeeName, workspaceName, workspaceLogo, attendanceRows, leaveBalances, holidays, weeklyHours, live, configured } = ctx;
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
   const fmtShort = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
@@ -137,14 +137,16 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
   const roleLine = [employee?.designation, employee?.dept].filter(Boolean).join(' · ') || 'Mark your attendance';
   const checkInLoc = attendanceRows[0]?.location || null;
 
-  const trend = live && weeklyHours.some((h) => h > 0) ? weeklyHours : [7.8, 8.2, 6.5, 8.6, 8.1, 4.0, 0];
+  // Demo numbers/sparkline appear only in the unconfigured marketing build.
+  // A configured app shows the employee's real figures (even when they're 0).
+  const trend = configured ? weeklyHours : [7.8, 8.2, 6.5, 8.6, 8.1, 4.0, 0];
   const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   const maxH = Math.max(9, ...trend);
   const monthKey = now.toISOString().slice(0, 7);
   const monthRows = attendanceRows.filter((r) => r.day.startsWith(monthKey));
-  const presentDays = live ? monthRows.filter((r) => ['Present', 'Late', 'WFH'].includes(r.status)).length : 18;
-  const trackedDays = live ? Math.max(presentDays, monthRows.length) : 22;
-  const leaveTotal = live ? leaveBalances.reduce((sum, b) => sum + b.available, 0) : 12;
+  const presentDays = configured ? monthRows.filter((r) => ['Present', 'Late', 'WFH'].includes(r.status)).length : 18;
+  const trackedDays = configured ? Math.max(presentDays, monthRows.length) : 22;
+  const leaveTotal = configured ? leaveBalances.reduce((sum, b) => sum + b.available, 0) : 12;
   const leaveTotalText = Number.isInteger(leaveTotal) ? String(leaveTotal) : leaveTotal.toFixed(1);
   const avg = trend.length ? trend.reduce((sum, h) => sum + h, 0) / trend.length : 0;
   const todayIso = now.toISOString().slice(0, 10);
@@ -357,7 +359,7 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
       status: r.status,
     };
   });
-  const log = ctx.live ? liveLog : demoLog;
+  const log = ctx.configured ? liveLog : demoLog;
   const count = (status: string) => log.filter((r) => r.status === status).length;
   const presentLike = log.filter((r) => ['Present', 'Late', 'WFH'].includes(r.status)).length;
   const rate = log.length ? Math.round((presentLike / log.length) * 100) : 0;

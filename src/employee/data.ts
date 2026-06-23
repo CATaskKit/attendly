@@ -57,6 +57,9 @@ export type Ctx = {
   now: Date;
   leaveRequests: LeaveRequest[];
   live: boolean;
+  /** true on any real deployment (Supabase keys present), even before the
+   *  profile/org loads — use this to suppress demo sample data. */
+  configured: boolean;
   employee: Employee | null;
   employeeName: string;
   workspaceName: string;

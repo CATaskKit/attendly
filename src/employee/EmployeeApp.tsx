@@ -197,8 +197,11 @@ export default function EmployeeApp() {
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
   const [toast, setToast] = useState<{ text: string; icon: string } | null>(null);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(live ? [] : INITIAL_LEAVE);
-  const [teamRequests, setTeamRequests] = useState<TeamRequest[]>(live ? [] : INITIAL_TEAM);
+  // Demo sample data is for the unconfigured marketing build only. A configured
+  // app (web live / APK) must NEVER show it — even during the cold-start window
+  // before the profile/orgId resolves — or it flickers demo → real data.
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(configured ? [] : INITIAL_LEAVE);
+  const [teamRequests, setTeamRequests] = useState<TeamRequest[]>(configured ? [] : INITIAL_TEAM);
 
   const empName = employee?.name || profile?.full_name || 'You';
 
@@ -304,7 +307,9 @@ export default function EmployeeApp() {
   const markAllRead = () => { void markAllNotificationsRead().then(loadNotifications).catch(console.error); };
   const markOneRead = (id: string) => { void markNotificationRead(id).then(loadNotifications).catch(console.error); };
   useEffect(() => {
-    if (live) return;
+    // Only the unconfigured demo build seeds sample data; a configured app shows
+    // empty state while live data loads, never demo content.
+    if (configured) return;
     setEmployee(null);
     setAttendanceRows([]);
     setLeaveBalances([]);
@@ -318,7 +323,7 @@ export default function EmployeeApp() {
     setReadAnnIds(new Set());
     setGeo({ enabled: false, lat: null, lng: null, radius: 150 });
     setWorkspace({ name: '', logo: null });
-  }, [live]);
+  }, [configured]);
 
   const showToast = (text: string, icon = 'checkCircle') => {
     setToast({ text, icon });
@@ -342,7 +347,7 @@ export default function EmployeeApp() {
 
   const ctx: Ctx = {
     tab, setTab: changeTab, status, checkInTime, checkOutTime, elapsed, now, leaveRequests,
-    live, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weeklyHours: weeklyHours(attendanceRows),
+    live, configured, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weeklyHours: weeklyHours(attendanceRows),
     attendanceAudit, refreshAttendanceAudit,
     timeSynced: clock.synced, timeSource: clock.source,
     fmtClock, fmtDur,

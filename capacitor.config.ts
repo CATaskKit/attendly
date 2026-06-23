@@ -6,10 +6,12 @@ const config: CapacitorConfig = {
   // Vite outputs the production web build here; `cap sync` copies it into the
   // native Android project (android/app/src/main/assets/public).
   webDir: 'dist',
-  backgroundColor: '#0e1116',
+  // Match the app's light theme background (theme.ts --bg) so cold start doesn't
+  // flash a dark webview before the UI paints.
+  backgroundColor: '#f4f6fa',
   plugins: {
     SplashScreen: {
-      backgroundColor: '#2f6bd6',
+      backgroundColor: '#f4f6fa',
       showSpinner: false,
       launchAutoHide: true,
     },
