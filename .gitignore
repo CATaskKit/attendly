@@ -28,3 +28,6 @@ android/app/src/main/assets/capacitor.config.json
 android/keystore.properties
 android/app/*.jks
 android/app/*.keystore
+
+# Firebase client config — kept local for the APK build, not in this public repo
+android/app/google-services.json

@@ -701,6 +701,14 @@ export type Notification = {
   id: string; type: string; title: string; body: string | null; read: boolean; created_at: string;
 };
 
+// Register a device's FCM token so the server can push notifications to it.
+export async function saveDeviceToken(token: string, platform = 'android'): Promise<void> {
+  if (!supabase) return;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  await supabase.from('device_tokens').upsert({ user_id: user.id, token, platform }, { onConflict: 'token' });
+}
+
 export async function listNotifications(limit = 200): Promise<Notification[]> {
   const { data, error } = await db().from('notifications')
     .select('id,type,title,body,read,created_at')
