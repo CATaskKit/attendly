@@ -296,6 +296,16 @@ export default function EmployeeApp() {
   // receipts and saving exports works without a mid-action permission stall.
   useEffect(() => { void requestAppPermissions(); void initPush(); }, []);
 
+  // Re-register the FCM token whenever the app comes to the foreground. After a
+  // reinstall or permission-granted-later, the token rotates; this keeps the
+  // saved device token fresh so closed-app push keeps working.
+  useEffect(() => {
+    if (!isNative()) return;
+    let handle: { remove: () => void } | undefined;
+    void import('@capacitor/app').then(({ App }) => App.addListener('resume', () => { void initPush(); }).then((h) => { handle = h; }));
+    return () => { handle?.remove(); };
+  }, []);
+
   useEffect(() => { void reloadLive(); }, [reloadLive]);
   // Live updates: refresh when leave/attendance change for this tenant.
   useEffect(() => {
