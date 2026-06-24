@@ -8,6 +8,14 @@ import { savedMessage } from '../lib/native';
 import { staticMapUrl } from '../lib/maps';
 import { APP_NAME, APP_VERSION } from '../lib/brand';
 
+// Compact address (building + road/area) for the home hero — the full address
+// is shown inside the check-in / check-out windows.
+function shortAddress(full: string | null): string | null {
+  if (!full) return full;
+  const parts = full.split(',').map((p) => p.trim()).filter(Boolean);
+  return parts.slice(0, 2).join(', ') || full;
+}
+
 // Map view — a real Google Static Map when a key + coordinates are available,
 // otherwise the schematic drawn map (no API key needed).
 export function MapView({ height = 190, label = 'Current device location', lat, lng }: { height?: number; label?: string; lat?: number | null; lng?: number | null }) {
@@ -234,7 +242,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
           <div style={{ position: 'relative' }}>
             <div style={{ fontSize: 12.5, opacity: 0.85, marginBottom: 2 }}>Working time</div>
             <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{fmtDur(elapsed)}</div>
-            <div style={{ fontSize: 13.5, opacity: 0.85, marginTop: 6, marginBottom: 18 }}>Checked in at {fmtClock(checkInTime)}{checkInLoc ? ` · ${checkInLoc}` : ''}</div>
+            <div style={{ fontSize: 13.5, opacity: 0.85, marginTop: 6, marginBottom: 18 }}>Checked in at {fmtClock(checkInTime)}{checkInLoc ? ` · ${shortAddress(checkInLoc)}` : ''}</div>
             <button onClick={() => openOverlay('checkout')} style={heroBtn}>
               <Icon name="clock" size={19} color="var(--accent)" strokeWidth={2.2} /> Check Out
             </button>

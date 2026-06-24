@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode, type ChangeEvent } from 'react';
 import { AIcon, ACard, APill, BtnPrimary, BtnGhost, PageHead, Spinner } from './ui';
-import { getOrganization, updateOrganization, getOrganizationSettings, setOrganizationSetting, uploadOrgLogo } from '../lib/api';
+import { getOrganization, updateOrganization, getOrganizationSettings, setOrganizationSetting, uploadOrgLogo, listDepartments, addDepartments, deleteDepartment, type Dept } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { getLocation } from '../lib/attendanceAudit';
 
@@ -526,9 +526,57 @@ function SubscriptionSettings({ goBilling }: SectionProps) {
   );
 }
 
+// ── Departments (LIVE) ───────────────────────────────────────────────
+function DepartmentsSettings({ orgId, canManage, notify }: SectionProps) {
+  const [depts, setDepts] = useState<Dept[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = () => listDepartments().then(setDepts).catch((e) => console.error(e)).finally(() => setLoading(false));
+  useEffect(() => { void load(); }, []);
+  const add = async () => {
+    const n = name.trim();
+    if (!n || !orgId) return;
+    setBusy(true);
+    try { await addDepartments(orgId, [n]); setName(''); await load(); notify('Department added'); }
+    catch (e) { notify(e instanceof Error ? e.message : 'Could not add department', 'red', 'xCircle'); }
+    finally { setBusy(false); }
+  };
+  const remove = async (d: Dept) => {
+    if (!window.confirm(`Remove the “${d.name}” department? Employees already assigned keep their label.`)) return;
+    setBusy(true);
+    try { await deleteDepartment(d.id); await load(); notify('Department removed'); }
+    catch (e) { notify(e instanceof Error ? e.message : 'Could not remove department', 'red', 'xCircle'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <SCard title="Departments" desc="Teams employees can be assigned to. Add or remove them here as your organization grows.">
+      {canManage && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void add(); }} placeholder="New department name" style={inputStyle} disabled={busy} />
+          <BtnPrimary icon="check" onClick={() => void add()} disabled={busy || !name.trim()}>Add</BtnPrimary>
+        </div>
+      )}
+      {loading ? <div style={{ color: 'var(--ink-3)', fontSize: 13 }}>Loading…</div>
+        : depts.length === 0 ? <div style={{ color: 'var(--ink-3)', fontSize: 13 }}>No departments yet — add your first above.</div>
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {depts.map((d) => (
+                <div key={d.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg)', border: '1px solid var(--line)' }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)' }}>{d.name}</span>
+                  {canManage && <button onClick={() => void remove(d)} disabled={busy} title="Remove" style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 6, display: 'flex' }}><AIcon name="trash" size={15} color="var(--ink-3)" /></button>}
+                </div>
+              ))}
+            </div>
+          )}
+    </SCard>
+  );
+}
+
 // ── Settings shell ───────────────────────────────────────────────────
 const SETTINGS_NAV = [
   { id: 'company', icon: 'building', label: 'Company profile', Body: CompanySettings },
+  { id: 'departments', icon: 'grid', label: 'Departments', Body: DepartmentsSettings },
   { id: 'workweek', icon: 'calendar', label: 'Work week', Body: WorkWeekSettings },
   { id: 'roles', icon: 'users', label: 'Roles & permissions', Body: RolesSettings },
   { id: 'attendance', icon: 'clock', label: 'Attendance policy', Body: AttendanceSettings },

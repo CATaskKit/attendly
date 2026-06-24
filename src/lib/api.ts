@@ -238,6 +238,11 @@ export async function addDepartments(orgId: string, names: string[]): Promise<vo
   if (error) throw error;
 }
 
+export async function deleteDepartment(id: string): Promise<void> {
+  const { error } = await db().from('departments').delete().eq('id', id);
+  if (error) throw error;
+}
+
 export async function addLeaveTypes(orgId: string, types: { name: string; quota: number }[]): Promise<void> {
   const clean = types
     .map((t) => ({ name: t.name.trim(), quota: t.quota }))
@@ -747,8 +752,11 @@ export async function saveDeviceToken(token: string, platform = 'android'): Prom
 }
 
 export async function listNotifications(limit = 200): Promise<Notification[]> {
+  // Notifications auto-expire after 24h — only the last day's are shown.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await db().from('notifications')
     .select('id,type,title,body,read,created_at')
+    .gte('created_at', since)
     .order('created_at', { ascending: false }).limit(limit);
   if (error) throw error;
   return (data ?? []) as Notification[];
@@ -845,12 +853,15 @@ export async function applyReimbursement(orgId: string, p: {
   if (error) throw error;
 }
 
-export async function decideReimbursement(row: Reimbursement, action: 'approve' | 'reject'): Promise<void> {
+// asHR: owner/HR approval is final in a single pass (skips the manager stage),
+// mirroring the leave HR-override. A manager approving a manager-stage claim
+// only forwards it to HR.
+export async function decideReimbursement(row: Reimbursement, action: 'approve' | 'reject', asHR = false): Promise<void> {
   const uid = await currentUid();
   let patch: Record<string, unknown>;
   if (action === 'reject') {
     patch = { status: 'Rejected', stage: 'reject', hr_decided_by: uid };
-  } else if (row.stage === 'manager') {
+  } else if (row.stage === 'manager' && !asHR) {
     patch = { stage: 'hr', manager_decided_by: uid };
   } else {
     patch = { status: 'Approved', stage: 'done', hr_decided_by: uid };
@@ -859,8 +870,8 @@ export async function decideReimbursement(row: Reimbursement, action: 'approve' 
   if (error) throw error;
 }
 
-export async function bulkDecideReimbursements(rows: Reimbursement[], action: 'approve' | 'reject'): Promise<void> {
-  for (const row of rows) await decideReimbursement(row, action);
+export async function bulkDecideReimbursements(rows: Reimbursement[], action: 'approve' | 'reject', asHR = false): Promise<void> {
+  for (const row of rows) await decideReimbursement(row, action, asHR);
 }
 
 /** Owner/HR only: permanently delete a claim and its receipt files. */

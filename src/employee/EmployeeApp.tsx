@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth';
 import {
   applyLeave, checkIn, checkOut, decideTeamLeave, decideLeave, listLeave, ensureMyEmployee, getTodayAttendance,
   listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
-  applyReimbursement, myReimbursements, compOffEarned, getOrganizationSettings,
+  applyReimbursement, myReimbursements, listReimbursements, decideReimbursement, compOffEarned, getOrganizationSettings,
   cancelLeave as apiCancelLeave, cancelReimbursement as apiCancelReimbursement,
   listAnnouncements, listAnnouncementReads, markAnnouncementRead,
   type AttendanceRow, type Employee, type Holiday, type LeaveBalance, type LeaveRow, type Reimbursement, type Announcement,
@@ -167,6 +167,7 @@ export default function EmployeeApp() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [teamRows, setTeamRows] = useState<LeaveRow[]>([]);
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
+  const [teamReimb, setTeamReimb] = useState<Reimbursement[]>([]);
   const [reimbState, setReimbState] = useState<{ enabled: boolean; requireManager: boolean }>({ enabled: false, requireManager: true });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [readAnnIds, setReadAnnIds] = useState<Set<string>>(new Set());
@@ -274,6 +275,10 @@ export default function EmployeeApp() {
       setTeamRows(approvals);
       setTeamRequests(approvals.map((r) => mapTeamLeave(r, role === 'manager')));
       setReimbursements(reimbRows);
+      // Approvers also load the org's pending claims to action (RLS-scoped to org).
+      if (canApproveTeam) {
+        listReimbursements().then((all) => setTeamReimb(all.filter((r) => r.status === 'Pending'))).catch(() => setTeamReimb([]));
+      } else setTeamReimb([]);
       setReimbState({ enabled: billing ? reimbursementActive(billing) : false, requireManager: billing?.reimbursement_require_manager ?? true });
       setWorkspace({ name: billing?.display_name || billing?.name || '', logo: billing?.logo_url ?? null });
       setAnnouncements(annRows);
@@ -324,6 +329,7 @@ export default function EmployeeApp() {
     setLeaveRequests(INITIAL_LEAVE);
     setTeamRequests(INITIAL_TEAM);
     setReimbursements([]);
+    setTeamReimb([]);
     setReimbState({ enabled: false, requireManager: true });
     setAnnouncements([]);
     setReadAnnIds(new Set());
@@ -459,6 +465,22 @@ export default function EmployeeApp() {
     goAdmin: () => navigate('/admin'),
     notifications, unreadCount, markAllRead, markOneRead,
     reimbursements,
+    teamReimbursements: teamReimb,
+    approveReimbursement: (id) => {
+      const row = teamReimb.find((x) => x.id === id);
+      if (!live || !row) return;
+      const isHR = role === 'owner' || role === 'hr';
+      const note = !isHR && row.stage === 'manager' ? `${row.emp || 'Claim'} forwarded to HR` : `${row.emp || 'Claim'} approved`;
+      decideReimbursement(row, 'approve', isHR).then(reloadLive).then(() => showToast(note, 'checkCircle'))
+        .catch((err) => { console.error(err); showToast(err instanceof Error ? err.message : 'Could not approve claim', 'x'); });
+    },
+    rejectReimbursement: (id) => {
+      const row = teamReimb.find((x) => x.id === id);
+      if (!live || !row) return;
+      const isHR = role === 'owner' || role === 'hr';
+      decideReimbursement(row, 'reject', isHR).then(reloadLive).then(() => showToast(`${row.emp || 'Claim'} rejected`, 'x'))
+        .catch((err) => { console.error(err); showToast(err instanceof Error ? err.message : 'Could not reject claim', 'x'); });
+    },
     reimbursementEnabled: reimbState.enabled,
     submitReimbursement: (d) => {
       if (!d.amount || d.amount <= 0) { showToast('Enter a valid amount', 'x'); return; }

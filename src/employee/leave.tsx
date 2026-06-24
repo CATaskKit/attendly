@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Icon, Avatar, Card, Pill, StatusBadge } from './ui';
 import { Legend, SectionTitle, ScreenHeader } from './screens';
 import type { Ctx, LeaveRequest, TeamRequest } from './data';
+import type { Reimbursement } from '../lib/api';
 
 const LEAVE_ICON: Record<string, string> = { Casual: 'coffee', Sick: 'umbrella', Paid: 'briefcase', 'Work from home': 'house', Unpaid: 'calendar' };
 
@@ -56,7 +57,7 @@ export function LeaveScreen({ ctx }: { ctx: Ctx }) {
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle>Requests</SectionTitle>
-        {ctx.leaveRequests.map((r, i) => <LeaveRow key={r.id || i} r={r} onCancel={ctx.cancelLeave} />)}
+        {ctx.leaveRequests.map((r, i) => <LeaveRow key={r.id || i} r={r} onCancel={ctx.role === 'employee' ? ctx.cancelLeave : undefined} />)}
       </div>
       <div style={{ height: 80 }} />
 
@@ -123,6 +124,10 @@ function Connector({ done }: { done?: boolean }) {
 // ─────────────────────── APPROVALS TAB (manager) ─────────────────────
 export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
   const { teamRequests, approveTeam, rejectTeam } = ctx;
+  const [view, setView] = useState<'leave' | 'reimb'>('leave');
+  const isHR = ctx.role === 'owner' || ctx.role === 'hr';
+  // HR/owner can action any pending claim (single pass); a manager only its stage.
+  const reimbQueue = ctx.teamReimbursements.filter((r) => r.status === 'Pending' && (isHR || r.stage === 'manager'));
   const [filter, setFilter] = useState<'Pending' | 'All'>('Pending');
   const pending = teamRequests.filter((r) => r.status === 'Pending');
   const actioned = teamRequests.filter((r) => r.status !== 'Pending').length;
@@ -134,6 +139,22 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
     <div>
       <ScreenHeader title="Approvals" subtitle={pending.length ? `${pending.length} request${pending.length > 1 ? 's' : ''} awaiting your review` : "You're all caught up"} />
 
+      {ctx.reimbursementEnabled && (
+        <div style={{ display: 'flex', background: 'var(--muted-soft)', borderRadius: 999, padding: 3, marginBottom: 14 }}>
+          {([['leave', 'Leave', pending.length], ['reimb', 'Reimbursements', reimbQueue.length]] as const).map(([v, label, n]) => {
+            const on = view === v;
+            return (
+              <button key={v} onClick={() => setView(v)} style={{
+                flex: 1, border: 'none', cursor: 'pointer', background: on ? 'var(--card)' : 'transparent',
+                color: on ? 'var(--text-1)' : 'var(--text-3)', fontWeight: 700, fontSize: 13, padding: '8px 10px',
+                borderRadius: 999, boxShadow: on ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}>{label}{n > 0 ? ` · ${n}` : ''}</button>
+            );
+          })}
+        </div>
+      )}
+
+      {view === 'leave' && (<>
       <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <Avatar name={ctx.employeeName} size={42} accent="var(--accent)" />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -182,8 +203,62 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
           {shown.map((r) => <ApprovalCard key={r.id} r={r} onApprove={() => approveTeam(r.id)} onReject={() => rejectTeam(r.id)} />)}
         </div>
       )}
+      </>)}
+
+      {view === 'reimb' && (
+        reimbQueue.length === 0 ? (
+          <Card pad={28} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}>
+            <div style={{ width: 54, height: 54, borderRadius: '50%', background: 'var(--success-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="checkCircle" size={28} color="var(--success)" strokeWidth={2} />
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>No pending claims</div>
+            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Reimbursement claims awaiting your approval will appear here.</div>
+          </Card>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {reimbQueue.map((r) => <ReimbApprovalCard key={r.id} r={r} isHR={isHR} onApprove={() => ctx.approveReimbursement(r.id)} onReject={() => ctx.rejectReimbursement(r.id)} />)}
+          </div>
+        )
+      )}
       <div style={{ height: 20 }} />
     </div>
+  );
+}
+
+function ReimbApprovalCard({ r, isHR, onApprove, onReject }: { r: Reimbursement; isHR: boolean; onApprove: () => void; onReject: () => void }) {
+  const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+  return (
+    <Card pad={15}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Avatar name={r.emp || '?'} size={42} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>{r.emp || '—'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>{r.code || '—'}{r.dept ? ` · ${r.dept}` : ''}</div>
+        </div>
+        <Pill tone="neutral">{r.stage === 'manager' ? 'Manager review' : 'HR review'}</Pill>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 13, padding: '11px 13px', borderRadius: 'var(--r-card)', background: 'var(--muted-soft)' }}>
+        <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>{inr(Number(r.amount))}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-1)' }}>{r.category}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Spent {new Date(r.spent_on + 'T00:00:00').toLocaleDateString()}{r.attachments?.length ? ` · ${r.attachments.length} receipt${r.attachments.length === 1 ? '' : 's'}` : ''}</div>
+        </div>
+      </div>
+      {r.reason && (
+        <div style={{ display: 'flex', gap: 9, marginTop: 11, paddingLeft: 2 }}>
+          <Icon name="message" size={15} color="var(--text-3)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.45 }}>{r.reason}</span>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+        <button onClick={onReject} style={{ flex: 1, height: 44, borderRadius: 'var(--r-btn)', border: '1.5px solid var(--hair)', background: 'var(--card)', color: 'var(--danger)', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
+          <Icon name="x" size={17} color="var(--danger)" strokeWidth={2.4} />Reject
+        </button>
+        <button onClick={onApprove} style={{ flex: 1.3, height: 44, borderRadius: 'var(--r-btn)', border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, boxShadow: '0 4px 14px var(--accent-glow)' }}>
+          <Icon name="check" size={17} color="#fff" strokeWidth={2.6} />{!isHR && r.stage === 'manager' ? 'Approve → HR' : 'Approve'}
+        </button>
+      </div>
+    </Card>
   );
 }
 

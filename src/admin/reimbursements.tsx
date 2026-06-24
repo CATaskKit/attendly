@@ -52,9 +52,10 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
   const isHR = role === 'owner' || role === 'hr';
   const isManager = role === 'manager';
 
-  // Who can action a Pending claim at its current stage.
+  // Who can action a Pending claim: HR/owner can approve ANY pending claim
+  // (single pass, even one still at manager stage); a manager only its own stage.
   const canDecide = (r: Reimbursement) =>
-    r.status === 'Pending' && (isManager ? r.stage === 'manager' : isHR && r.stage !== 'manager');
+    r.status === 'Pending' && (isHR || (isManager && r.stage === 'manager'));
 
   const counts = useMemo(() => ({
     Pending: rows.filter((r) => r.status === 'Pending').length,
@@ -125,8 +126,8 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
         />
         {actionable.length > 0 && (
           <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
-            <BtnGhost icon="x" onClick={() => run(() => bulkDecideReimbursements(actionable, 'reject'), 'Claims rejected')} disabled={busy}>Reject {actionable.length}</BtnGhost>
-            <BtnPrimary icon="check" tone="green" onClick={() => run(() => bulkDecideReimbursements(actionable, 'approve'), 'Claims approved')} disabled={busy}>Approve {actionable.length}</BtnPrimary>
+            <BtnGhost icon="x" onClick={() => run(() => bulkDecideReimbursements(actionable, 'reject', isHR), 'Claims rejected')} disabled={busy}>Reject {actionable.length}</BtnGhost>
+            <BtnPrimary icon="check" tone="green" onClick={() => run(() => bulkDecideReimbursements(actionable, 'approve', isHR), 'Claims approved')} disabled={busy}>Approve {actionable.length}</BtnPrimary>
           </div>
         )}
         {isHR && approvedSel.length > 0 && (
@@ -179,8 +180,8 @@ export function Reimbursements({ rows, role, billing, onChanged, onToast, onGoBi
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
                     {canDecide(r) && (
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={() => run(() => decideReimbursement(r, 'reject'), 'Claim rejected')} disabled={busy} title="Reject" style={iconBtn('red')}><AIcon name="x" size={17} color="var(--red)" sw={2.2} /></button>
-                        <button onClick={() => run(() => decideReimbursement(r, 'approve'), r.stage === 'manager' ? 'Forwarded to HR' : 'Claim approved')} disabled={busy} title={r.stage === 'manager' ? 'Approve → HR' : 'Approve'} style={iconBtn('green')}><AIcon name="check" size={17} color="var(--green)" sw={2.4} /></button>
+                        <button onClick={() => run(() => decideReimbursement(r, 'reject', isHR), 'Claim rejected')} disabled={busy} title="Reject" style={iconBtn('red')}><AIcon name="x" size={17} color="var(--red)" sw={2.2} /></button>
+                        <button onClick={() => run(() => decideReimbursement(r, 'approve', isHR), !isHR && r.stage === 'manager' ? 'Forwarded to HR' : 'Claim approved')} disabled={busy} title={!isHR && r.stage === 'manager' ? 'Approve → HR' : 'Approve'} style={iconBtn('green')}><AIcon name="check" size={17} color="var(--green)" sw={2.4} /></button>
                       </div>
                     )}
                     {isHR && r.status === 'Approved' && (

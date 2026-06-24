@@ -97,6 +97,9 @@ export type Ctx = {
   markAllRead: () => void;
   markOneRead: (id: string) => void;
   reimbursements: Reimbursement[];
+  teamReimbursements: Reimbursement[];
+  approveReimbursement: (id: string) => void;
+  rejectReimbursement: (id: string) => void;
   reimbursementEnabled: boolean;
   submitReimbursement: (draft: ReimbursementDraft) => void;
   cancelReimbursement: (id: string) => void;
