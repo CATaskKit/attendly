@@ -1023,6 +1023,22 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
         <AIcon name="shield" size={15} color="var(--ink-3)" />
         <span style={{ fontSize: 12 }}>Payments are processed securely by Razorpay. Connect your Razorpay keys (SETUP.md §6) to enable purchases.</span>
       </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 14px', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.02em' }}>Policies</span>
+        {([
+          ['Terms & Conditions', 'terms.html'],
+          ['Privacy', 'privacy.html'],
+          ['Refund & Cancellation', 'refund.html'],
+          ['Service Delivery', 'shipping.html'],
+          ['Contact', 'contact.html'],
+        ] as const).map(([label, path]) => (
+          <a key={path} href={`https://www.cataskkit.in/${path}`} target="_blank" rel="noopener noreferrer"
+            style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>
+            {label}
+          </a>
+        ))}
+      </div>
     </div>
   );
 }
