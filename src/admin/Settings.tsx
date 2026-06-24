@@ -345,10 +345,12 @@ function RolesSettings({ orgId, canManage, notify }: SectionProps) {
 }
 
 // ── 3. Attendance policy (local) ─────────────────────────────────────
-type AttPolicy = { geofence: number; ot: number; half: number; selfie: boolean; web: boolean; otOn: boolean; geo: boolean; officeLat: number | null; officeLng: number | null };
+type AttPolicy = { geofence: number; ot: number; half: number; selfie: boolean; web: boolean; otOn: boolean; geo: boolean; officeLat: number | null; officeLng: number | null; autoCheckout?: 'off' | 'hours' | 'time'; autoHours?: number; autoTime?: string };
+const AUTO_LABEL: Record<'off' | 'hours' | 'time', string> = { off: 'Off', hours: 'Hours after check-in', time: 'At a fixed time' };
+const AUTO_MODE: Record<string, 'off' | 'hours' | 'time'> = { 'Off': 'off', 'Hours after check-in': 'hours', 'At a fixed time': 'time' };
 function AttendanceSettings({ orgId, canManage, notify }: SectionProps) {
-  const [c, setC] = useOrgSetting<AttPolicy>(orgId, 'attendancePolicy', { geofence: 150, ot: 8, half: 4, selfie: true, web: false, otOn: true, geo: false, officeLat: null, officeLng: null });
-  const u = (k: keyof AttPolicy, v: number | boolean) => setC({ ...c, [k]: v });
+  const [c, setC] = useOrgSetting<AttPolicy>(orgId, 'attendancePolicy', { geofence: 150, ot: 8, half: 4, selfie: true, web: false, otOn: true, geo: false, officeLat: null, officeLng: null, autoCheckout: 'off', autoHours: 8, autoTime: '20:00' });
+  const u = (k: keyof AttPolicy, v: number | boolean | string) => setC({ ...c, [k]: v });
   const [locating, setLocating] = useState(false);
   const captureOffice = async () => {
     setLocating(true);
@@ -378,7 +380,18 @@ function AttendanceSettings({ orgId, canManage, notify }: SectionProps) {
           <SToggle on={c.otOn} onChange={(v) => u('otOn', v)} />
         </div>
       </SettingItem>
-      <SettingItem label="Half-day threshold" desc="Worked hours below this count as a half day." last><SNumber value={c.half} onChange={(v) => u('half', v)} min={2} max={6} unit="hrs" /></SettingItem>
+      <SettingItem label="Half-day threshold" desc="Worked hours below this count as a half day."><SNumber value={c.half} onChange={(v) => u('half', v)} min={2} max={6} unit="hrs" /></SettingItem>
+      <SettingItem label="Auto check-out" desc="If an employee forgets to check out, close the day automatically after midnight (no location is recorded) so payroll isn't blocked by an open shift.">
+        <SSelect value={AUTO_LABEL[c.autoCheckout ?? 'off']} onChange={(l) => u('autoCheckout', AUTO_MODE[l] ?? 'off')} options={['Off', 'Hours after check-in', 'At a fixed time']} />
+      </SettingItem>
+      {(c.autoCheckout ?? 'off') === 'hours' && (
+        <SettingItem label="Close after" desc="Hours counted from the employee's check-in time."><SNumber value={c.autoHours ?? 8} onChange={(v) => u('autoHours', v)} min={4} max={16} unit="hrs" /></SettingItem>
+      )}
+      {(c.autoCheckout ?? 'off') === 'time' && (
+        <SettingItem label="Close at" desc="A fixed clock time used as the auto check-out." last>
+          <input type="time" value={c.autoTime ?? '20:00'} disabled={!canManage} onChange={(e) => u('autoTime', e.target.value)} style={{ ...inputStyle, width: 140, fontWeight: 600 }} />
+        </SettingItem>
+      )}
     </SCard>
   );
 }

@@ -642,6 +642,19 @@ export async function myLeaveBalances(orgId: string, employee: Employee | null, 
     });
 }
 
+// Attendance rows for one calendar month (month is 0-based), newest first.
+export async function listMyAttendanceMonth(orgId: string, employee: Employee | null, year: number, month: number): Promise<AttendanceRow[]> {
+  if (!employee?.id) return [];
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const start = `${year}-${pad(month + 1)}-01`;
+  const end = `${year}-${pad(month + 1)}-${pad(new Date(year, month + 1, 0).getDate())}`;
+  const { data, error } = await db().from('attendance').select('*')
+    .eq('org_id', orgId).eq('employee_id', employee.id)
+    .gte('day', start).lte('day', end).order('day', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as AttendanceRow[];
+}
+
 export async function listMyAttendance(orgId: string, employee: Employee | null, limit = 45): Promise<AttendanceRow[]> {
   if (!employee?.id) return [];
   const { data, error } = await db()

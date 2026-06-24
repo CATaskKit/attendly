@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { Icon, Avatar, Card, Pill, StatusBadge } from './ui';
 import type { Ctx } from './data';
 import { useAuth } from '../lib/auth';
-import { getMyEmployee, type Employee, type AttendanceRow, type Holiday } from '../lib/api';
+import { getMyEmployee, listMyAttendanceMonth, type Employee, type AttendanceRow, type Holiday } from '../lib/api';
 import { isOffDate, type WeekendConfig } from '../lib/calendar';
 import { savedMessage } from '../lib/native';
 import { staticMapUrl } from '../lib/maps';
@@ -366,16 +366,17 @@ const calNav: CSSProperties = { width: 32, height: 32, borderRadius: 9, border: 
 
 // A real, navigable month grid that highlights the employee's attendance (with
 // check-in time), company holidays and weekly-offs. Tap a day for its detail.
-function MonthCalendar({ attendanceRows, holidays, weekend }: { attendanceRows: AttendanceRow[]; holidays: Holiday[]; weekend: WeekendConfig }) {
+function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth }: { attendanceRows: AttendanceRow[]; holidays: Holiday[]; weekend: WeekendConfig; view: Date; onChangeMonth: (delta: number) => void }) {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const isoOf = (dt: Date) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
   const todayIso = isoOf(now);
-  const [view, setView] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
   const y = view.getFullYear(), m = view.getMonth();
   const dayIso = (d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
   const inThisMonth = todayIso.startsWith(`${y}-${pad(m + 1)}`);
   const [selected, setSelected] = useState<string | null>(inThisMonth ? todayIso : null);
+  // Clear the day selection whenever the parent switches month.
+  useEffect(() => { setSelected(inThisMonth ? todayIso : null); }, [y, m]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const attByDay = useMemo(() => { const map = new Map<string, AttendanceRow>(); for (const r of attendanceRows) map.set(r.day, r); return map; }, [attendanceRows]);
   const holByDay = useMemo(() => { const map = new Map<string, Holiday>(); for (const h of holidays) map.set(h.date, h); return map; }, [holidays]);
@@ -388,7 +389,7 @@ function MonthCalendar({ attendanceRows, holidays, weekend }: { attendanceRows: 
 
   const t24 = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false });
   const t12 = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '—';
-  const go = (delta: number) => { setSelected(null); setView(new Date(y, m + delta, 1)); };
+  const go = (delta: number) => onChangeMonth(delta);
 
   let detail: ReactNode = null;
   if (selected) {
@@ -468,6 +469,23 @@ function MonthCalendar({ attendanceRows, holidays, weekend }: { attendanceRows: 
 
 // ─────────────────────── ATTENDANCE TAB ──────────────────────────────
 export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
+  const now = ctx.now;
+  const [view, setView] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
+  const isCurrentMonth = view.getFullYear() === now.getFullYear() && view.getMonth() === now.getMonth();
+  const monthLabel = view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  // The current month tracks the live ctx rows; other months are fetched on demand.
+  const [monthRows, setMonthRows] = useState<AttendanceRow[]>(ctx.attendanceRows);
+  useEffect(() => {
+    if (!ctx.configured || isCurrentMonth) { setMonthRows(ctx.attendanceRows); return; }
+    if (!ctx.orgId || !ctx.employee) { setMonthRows([]); return; }
+    let active = true;
+    listMyAttendanceMonth(ctx.orgId, ctx.employee, view.getFullYear(), view.getMonth())
+      .then((r) => { if (active) setMonthRows(r); })
+      .catch(() => { if (active) setMonthRows([]); });
+    return () => { active = false; };
+  }, [view, isCurrentMonth, ctx.attendanceRows, ctx.orgId, ctx.employee, ctx.configured]);
+
   const fmtTime = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false }) : '-';
   const fmtHours = (seconds: number | null) => {
     if (!seconds) return '-';
@@ -479,11 +497,8 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
     { d: 'Wed', date: 'Jun 5', in: '9:18', out: '6:42', h: '9:24', status: 'Present' },
     { d: 'Tue', date: 'Jun 4', in: '9:31', out: '6:35', h: '9:04', status: 'Late' },
     { d: 'Mon', date: 'Jun 3', in: '9:12', out: '1:30', h: '4:18', status: 'WFH' },
-    { d: 'Sun', date: 'Jun 2', in: '-', out: '-', h: '-', status: 'Holiday' },
-    { d: 'Sat', date: 'Jun 1', in: '-', out: '-', h: '-', status: 'Leave' },
-    { d: 'Fri', date: 'May 31', in: '9:05', out: '6:20', h: '9:15', status: 'Present' },
   ];
-  const liveLog = ctx.attendanceRows.map((r) => {
+  const liveLog = monthRows.map((r) => {
     const d = new Date(`${r.day}T00:00:00`);
     return {
       d: d.toLocaleDateString('en-US', { weekday: 'short' }),
@@ -504,26 +519,32 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
     { label: 'Absent', value: count('Absent'), tone: 'danger' },
     { label: 'Late', value: count('Late'), tone: 'warning' },
   ];
+  // The list shows just the most recent week of the selected month; Export
+  // covers the whole month.
+  const weekLog = log.slice(0, 7);
   const exportMine = async () => {
-    const rows = ctx.attendanceRows.map((r) => ({
+    const rows = monthRows.map((r) => ({
       Date: r.day,
       'Check in': r.check_in_at ? new Date(r.check_in_at).toLocaleString() : '',
       'Check out': r.check_out_at ? new Date(r.check_out_at).toLocaleString() : '',
       Hours: r.work_seconds ? Number((r.work_seconds / 3600).toFixed(2)) : 0,
-      Status: r.status, Location: r.location || '',
+      Status: r.status,
+      'Check-in location': r.location || '',
+      'Check-out location': r.checkout_location || '',
     }));
     if (!rows.length) return;
     try {
       // Load the xlsx-heavy export module on demand so it stays out of the
       // initial app bundle (most sessions never export).
       const { downloadSheets } = await import('../lib/export');
-      const where = await downloadSheets(`My_Attendance_${ctx.now.toISOString().slice(0, 7)}.xlsx`, [{ name: 'Attendance', rows }]);
+      const stamp = `${view.getFullYear()}-${String(view.getMonth() + 1).padStart(2, '0')}`;
+      const where = await downloadSheets(`My_Attendance_${stamp}.xlsx`, [{ name: 'Attendance', rows }]);
       ctx.notify(savedMessage(where));
     } catch (e) { console.error(e); ctx.notify('Could not export — try again', 'x'); }
   };
   return (
     <div>
-      <ScreenHeader title="Attendance" subtitle={ctx.now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} />
+      <ScreenHeader title="Attendance" subtitle={`${monthLabel}${isCurrentMonth ? '' : ' · past month'}`} />
       <Card pad={16}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <div>
@@ -549,15 +570,15 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle>Calendar</SectionTitle>
-        <MonthCalendar attendanceRows={ctx.attendanceRows} holidays={ctx.holidays} weekend={ctx.weekend} />
+        <MonthCalendar attendanceRows={monthRows} holidays={ctx.holidays} weekend={ctx.weekend} view={view} onChangeMonth={(d) => setView(new Date(view.getFullYear(), view.getMonth() + d, 1))} />
       </div>
 
       <div style={{ marginTop: 22 }}>
-        <SectionTitle action={ctx.live && ctx.attendanceRows.length > 0 ? 'Export' : undefined} onAction={() => void exportMine()}>Daily log</SectionTitle>
+        <SectionTitle action={ctx.live && monthRows.length > 0 ? `Export ${monthLabel.split(' ')[0]}` : undefined} onAction={() => void exportMine()}>Daily log · last 7 days</SectionTitle>
         <Card pad={0} style={{ overflow: 'hidden' }}>
-          {log.length === 0 && <div style={{ padding: 18, color: 'var(--text-3)', fontSize: 13.5 }}>No attendance records yet.</div>}
-          {log.map((e, i) => (
-            <div key={`${e.date}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 15px', borderBottom: i < log.length - 1 ? '1px solid var(--hair)' : 'none' }}>
+          {weekLog.length === 0 && <div style={{ padding: 18, color: 'var(--text-3)', fontSize: 13.5 }}>No attendance records for {monthLabel}.</div>}
+          {weekLog.map((e, i) => (
+            <div key={`${e.date}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 15px', borderBottom: i < weekLog.length - 1 ? '1px solid var(--hair)' : 'none' }}>
               <div style={{ width: 40, textAlign: 'center', flexShrink: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>{e.d}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{e.date.split(' ')[1]}</div>

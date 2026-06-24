@@ -71,6 +71,7 @@ export type Ctx = {
   leaveBalances: LeaveBalance[];
   holidays: Holiday[];
   weekend: WeekendConfig;
+  orgId: string | null;
   weeklyHours: number[];
   attendanceAudit: AttendanceAudit;
   refreshAttendanceAudit: () => Promise<AttendanceAudit>;

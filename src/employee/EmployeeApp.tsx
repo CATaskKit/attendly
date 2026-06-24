@@ -353,7 +353,7 @@ export default function EmployeeApp() {
 
   const ctx: Ctx = {
     tab, setTab: changeTab, status, checkInTime, checkOutTime, elapsed, now, leaveRequests,
-    live, configured, homeLoading: live && !hasLoaded, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weekend, weeklyHours: weeklyHours(attendanceRows),
+    live, configured, homeLoading: live && !hasLoaded, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weekend, orgId, weeklyHours: weeklyHours(attendanceRows),
     attendanceAudit, refreshAttendanceAudit,
     timeSynced: clock.synced, timeSource: clock.source,
     fmtClock, fmtDur,
