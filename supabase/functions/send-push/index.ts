@@ -67,16 +67,25 @@ Deno.serve(async (req) => {
     // Supabase DB webhook payload: { type, table, record, old_record, ... }
     const payload = await req.json().catch(() => ({}));
     const record = payload?.record;
-    if (!record?.user_id) return new Response('no user_id in record', { status: 200 });
+    if (!record) return new Response('no record', { status: 200 });
 
     const url = Deno.env.get('SUPABASE_URL')!;
     const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const admin = createClient(url, service);
 
-    const { data: tokens } = await admin
-      .from('device_tokens')
-      .select('token')
-      .eq('user_id', record.user_id);
+    // Resolve recipients: a per-user notification (record.user_id) targets one
+    // person; an org-wide announcement (record.org_id, no user_id) fans out to
+    // every member of the org.
+    let tokens: { token: string }[] | null = null;
+    if (record.user_id) {
+      ({ data: tokens } = await admin.from('device_tokens').select('token').eq('user_id', record.user_id));
+    } else if (record.org_id) {
+      const { data: members } = await admin.from('profiles').select('id').eq('org_id', record.org_id);
+      const ids = (members ?? []).map((m: { id: string }) => m.id);
+      if (ids.length) ({ data: tokens } = await admin.from('device_tokens').select('token').in('user_id', ids));
+    } else {
+      return new Response('no target', { status: 200 });
+    }
     if (!tokens || tokens.length === 0) return new Response('no devices', { status: 200 });
 
     const accessToken = await getAccessToken(sa);
