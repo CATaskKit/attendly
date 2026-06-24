@@ -199,6 +199,24 @@ export async function setEmployeeBasicSalary(employeeId: string, value: number):
   if (error) throw error;
 }
 
+// ── Payroll adjustments (HR ± unpaid-leave days, per employee per cycle) ──
+export async function listPayrollAdjustments(orgId: string, cycle: string): Promise<Record<string, number>> {
+  const { data, error } = await db().from('payroll_adjustments')
+    .select('employee_id,adjust_days').eq('org_id', orgId).eq('cycle', cycle);
+  if (error) throw error;
+  const out: Record<string, number> = {};
+  for (const r of data ?? []) out[r.employee_id as string] = Number(r.adjust_days) || 0;
+  return out;
+}
+
+export async function savePayrollAdjustment(orgId: string, employeeId: string, cycle: string, adjustDays: number): Promise<void> {
+  const { error } = await db().from('payroll_adjustments').upsert(
+    { org_id: orgId, employee_id: employeeId, cycle, adjust_days: adjustDays, updated_at: new Date().toISOString() },
+    { onConflict: 'org_id,employee_id,cycle' },
+  );
+  if (error) throw error;
+}
+
 /** Upload a workspace logo to the public 'branding' bucket; returns its public URL. */
 export async function uploadOrgLogo(orgId: string, file: File): Promise<string> {
   const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';

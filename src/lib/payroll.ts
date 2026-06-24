@@ -45,13 +45,25 @@ export function cycleRange(year: number, monthIndex: number, startDay: number): 
 
 /** Working days in [start,end] = days that are neither a company day-off nor a holiday. */
 export function workingDaysInRange(start: Date, end: Date, cfg: WeekendConfig, holidays: Set<string>): number {
-  let n = 0;
+  return cycleBreakdown(start, end, cfg, holidays).working;
+}
+
+/**
+ * One pass over the cycle splitting it into weekends (company days-off),
+ * compulsory holidays (counted only on days that aren't already a weekend) and
+ * working days. `working = calendar − weekends − holidays`, so it's transparent
+ * how the working-day count was reached.
+ */
+export function cycleBreakdown(start: Date, end: Date, cfg: WeekendConfig, holidays: Set<string>): { weekends: number; holidays: number; working: number } {
+  let weekends = 0, hol = 0, working = 0;
   const d = new Date(start);
   while (d <= end) {
-    if (!isOffDate(d, cfg) && !holidays.has(isoDate(d))) n++;
+    if (isOffDate(d, cfg)) weekends++;
+    else if (holidays.has(isoDate(d))) hol++;
+    else working++;
     d.setDate(d.getDate() + 1);
   }
-  return n;
+  return { weekends, holidays: hol, working };
 }
 
 /** A leave type that loses pay. Org leave-type names vary, so match common ones. */

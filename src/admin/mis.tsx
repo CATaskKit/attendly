@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { AIcon, AAvatar, ACard, APill, ABadge, PageHead, BtnGhost, BtnPrimary, Spinner } from './ui';
 import { supabase } from '../lib/supabase';
 import type { Employee, LeaveRow, Holiday } from '../lib/api';
-import { setEmployeeBasicSalary, getOrganizationSettings, setOrganizationSetting } from '../lib/api';
+import { setEmployeeBasicSalary, getOrganizationSettings, setOrganizationSetting, listPayrollAdjustments, savePayrollAdjustment } from '../lib/api';
 import { countExtraDays } from '../lib/compoff';
 import { countWorkingDays, type WeekendConfig } from '../lib/calendar';
-import { payrollPolicyFrom, cycleRange, workingDaysInRange, isUnpaidLeave, leaveDaysInCycle, DEFAULT_PAYROLL, type PayrollPolicy } from '../lib/payroll';
+import { payrollPolicyFrom, cycleRange, cycleBreakdown, isUnpaidLeave, leaveDaysInCycle, DEFAULT_PAYROLL, type PayrollPolicy } from '../lib/payroll';
 import { downloadSheets } from '../lib/export';
 import { lateThresholdMinutes, type ShiftPolicy } from '../lib/shift';
 import CheckinMapModal from './CheckinMapModal';
@@ -242,9 +242,15 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
     if (orgId) setOrganizationSetting(orgId, 'payrollPolicy', next).catch((err) => { console.error(err); onToast('Could not save payroll setting', 'red', 'xCircle'); });
   };
 
+  // Every holiday earns comp-off, but only COMPULSORY ones (National/Festival —
+  // i.e. not 'Optional') close the office and reduce working days.
   const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
+  const compulsoryHolidays = useMemo(() => new Set(holidays.filter((h) => (h.type || '').toLowerCase() !== 'optional').map((h) => h.date)), [holidays]);
   const cycle = useMemo(() => cycleRange(selY, selM, policy.cycleStartDay), [selY, selM, policy.cycleStartDay]);
-  const workingDays = useMemo(() => workingDaysInRange(cycle.start, cycle.end, weekend, holidaySet), [cycle, weekend, holidaySet]);
+  // Working days = calendar − company weekends − compulsory holidays (computed,
+  // never a fixed number).
+  const breakdown = useMemo(() => cycleBreakdown(cycle.start, cycle.end, weekend, compulsoryHolidays), [cycle, weekend, compulsoryHolidays]);
+  const workingDays = breakdown.working;
   const divisor = policy.dayBasis === 'working' ? workingDays : cycle.calendarDays;
   const basisLabel = policy.dayBasis === 'working' ? 'working days' : 'calendar days';
 
@@ -268,12 +274,23 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
     setEmployeeBasicSalary(id, v).catch((err) => { console.error(err); onToast('Could not save salary', 'red', 'xCircle'); });
   };
 
-  // HR manual leave adjustment per employee: + adds unpaid days, − waives them.
+  // HR manual leave adjustment per employee (+ adds unpaid days, − waives them),
+  // persisted per cycle in payroll_adjustments so the run survives a reload.
+  const cycleKey = `${selY}-${selM}:${policy.cycleStartDay}`;
   const [adj, setAdj] = useState<Record<string, number>>({});
   const [payExtra, setPayExtra] = useState(false);
   const [processed, setProcessed] = useState(false);
-  // A new cycle/month is a fresh run — clear adjustments and processed state.
-  useEffect(() => { setAdj({}); setPayExtra(false); setProcessed(false); }, [sel, policy.cycleStartDay]);
+  useEffect(() => {
+    setPayExtra(false); setProcessed(false);
+    if (!orgId) { setAdj({}); return; }
+    let active = true;
+    listPayrollAdjustments(orgId, cycleKey).then((m) => { if (active) setAdj(m); }).catch(() => { if (active) setAdj({}); });
+    return () => { active = false; };
+  }, [orgId, cycleKey]);
+  const setAdjFor = (id: string, v: number) => {
+    setAdj((p) => ({ ...p, [id]: v }));
+    if (orgId) savePayrollAdjustment(orgId, id, cycleKey, v).catch((err) => { console.error(err); onToast('Could not save adjustment', 'red', 'xCircle'); });
+  };
 
   const data = active.map((e) => {
     const basic = edits[e.id] ?? (Number(e.basic_salary) || 0);
@@ -374,7 +391,7 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '12px 16px', borderRadius: 12, background: processed ? 'var(--green-soft)' : 'var(--soft)', border: '1px solid var(--line)' }}>
             <AIcon name={processed ? 'checkCircle' : 'shield'} size={18} color={processed ? 'var(--green)' : 'var(--ink-3)'} />
             <span style={{ fontSize: 13, color: processed ? 'var(--green)' : 'var(--ink-2)', fontWeight: 600 }}>
-              {processed ? `Salary processed for ${data.length} employees for ${cycle.label}.` : `Salary payable = Basic − (Basic ÷ ${divisor} ${basisLabel}) × LOP days. Only unpaid leave (+ HR adjustment) is deducted — paid leave and attendance gaps don't reduce pay.`}
+              {processed ? `Salary processed for ${data.length} employees for ${cycle.label}.` : `Salary payable = Basic − (Basic ÷ ${divisor} ${basisLabel}) × LOP days. Working days = ${cycle.calendarDays} calendar − ${breakdown.weekends} weekend${breakdown.weekends === 1 ? '' : 's'} − ${breakdown.holidays} holiday${breakdown.holidays === 1 ? '' : 's'} = ${workingDays}. Only unpaid leave (+ HR adjustment) is deducted — paid leave and attendance gaps don't reduce pay.`}
             </span>
           </div>
 
@@ -407,8 +424,8 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
                 </td>
                 <td style={{ ...tdNum, color: r.unpaid ? 'var(--red)' : 'var(--ink-3)' }}>{r.unpaid || '—'}</td>
                 <td style={{ ...tdNum, padding: '8px 18px' }}>
-                  <input type="number" value={r.adjust} disabled={!canManage} onChange={(ev) => setAdj((p) => ({ ...p, [r.e.id]: Number(ev.target.value) || 0 }))}
-                    title="Add (+) or waive (−) unpaid leave days for this run"
+                  <input type="number" value={r.adjust} disabled={!canManage} onChange={(ev) => setAdjFor(r.e.id, Number(ev.target.value) || 0)}
+                    title="Add (+) or waive (−) unpaid leave days — saved per cycle"
                     style={{ width: 76, textAlign: 'right', height: 34, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', padding: '0 10px', fontSize: 13, fontWeight: 700, color: 'var(--ink-1)', fontFamily: 'inherit', outline: 'none', fontVariantNumeric: 'tabular-nums' }} />
                 </td>
                 <td style={{ ...tdNum, color: r.lop ? 'var(--red)' : 'var(--ink-3)' }}>{r.lop || '—'}</td>
