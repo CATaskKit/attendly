@@ -5,7 +5,7 @@ import { isNative, openLocationSettings, savedMessage } from '../lib/native';
 import { MapView, VRow, SelfieTile } from './screens';
 import type { Ctx } from './data';
 import { APP_NAME } from '../lib/brand';
-import { signedReceiptUrl } from '../lib/api';
+import { signedReceiptUrl, type Holiday } from '../lib/api';
 import { fmtINR } from '../lib/billing';
 
 const fieldLabel: CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 9, letterSpacing: '0.01em' };
@@ -691,6 +691,46 @@ export function ReimbursementsScreen({ ctx }: { ctx: Ctx }) {
 }
 
 // ── Logout confirmation sheet ────────────────────────────────────────
+// ── HOLIDAYS (full list) ─────────────────────────────────────────────
+function HolidayRow({ h, dim }: { h: Holiday; dim?: boolean }) {
+  const d = new Date(`${h.date}T00:00:00`);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '12px 10px', opacity: dim ? 0.55 : 1 }}>
+      <div style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--accent)' }}>{d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}</span>
+        <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent)', lineHeight: 1 }}>{d.getDate()}</span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>{h.name}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{h.type} holiday · {d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric' })}</div>
+      </div>
+    </div>
+  );
+}
+
+export function HolidaysScreen({ ctx }: { ctx: Ctx }) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const sorted = [...ctx.holidays].sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = sorted.filter((h) => h.date >= todayIso);
+  const past = sorted.filter((h) => h.date < todayIso).reverse();
+  const heading = (t: string, mt = 4) => (
+    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: `${mt}px 4px 6px` }}>{t}</div>
+  );
+  return (
+    <Overlay title="Holidays" onClose={ctx.closeOverlay}>
+      {ctx.holidays.length === 0 ? (
+        <Card pad={16} style={{ color: 'var(--text-3)', fontSize: 13.5 }}>No holidays have been added yet.</Card>
+      ) : (
+        <>
+          {upcoming.length > 0 && (<>{heading(`Upcoming · ${upcoming.length}`)}<Card pad={4}>{upcoming.map((h, i) => <div key={h.id ?? i} style={{ borderTop: i ? '1px solid var(--hair)' : 'none' }}><HolidayRow h={h} /></div>)}</Card></>)}
+          {past.length > 0 && (<>{heading(`Earlier this year · ${past.length}`, 18)}<Card pad={4}>{past.map((h, i) => <div key={h.id ?? i} style={{ borderTop: i ? '1px solid var(--hair)' : 'none' }}><HolidayRow h={h} dim /></div>)}</Card></>)}
+        </>
+      )}
+      <div style={{ height: 16 }} />
+    </Overlay>
+  );
+}
+
 export function LogoutConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>

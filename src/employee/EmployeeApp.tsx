@@ -11,7 +11,7 @@ import {
 } from '../lib/api';
 import { onTablesChange } from '../lib/realtime';
 import { fetchBilling, reimbursementActive } from '../lib/billing';
-import { weekendConfigFrom } from '../lib/calendar';
+import { weekendConfigFrom, DEFAULT_WEEKEND, type WeekendConfig } from '../lib/calendar';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import PhoneFrame from '../components/PhoneFrame';
 import { Toast } from './ui';
@@ -22,7 +22,7 @@ import { requestAppPermissions, isNative } from '../lib/native';
 import { initPush } from '../lib/push';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
-import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen, AnnouncementsScreen } from './overlays';
+import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen, AnnouncementsScreen, HolidaysScreen } from './overlays';
 import { INITIAL_LEAVE, INITIAL_TEAM, type Ctx, type LeaveRequest, type Status, type TeamRequest } from './data';
 
 const isoDate = (d: Date) => formatAppDate(d);
@@ -171,6 +171,7 @@ export default function EmployeeApp() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [readAnnIds, setReadAnnIds] = useState<Set<string>>(new Set());
   const [geo, setGeo] = useState<{ enabled: boolean; lat: number | null; lng: number | null; radius: number }>({ enabled: false, lat: null, lng: null, radius: 150 });
+  const [weekend, setWeekend] = useState<WeekendConfig>(DEFAULT_WEEKEND);
   const [workspace, setWorkspace] = useState<{ name: string; logo: string | null }>({ name: '', logo: null });
   const [attendanceAudit, setAttendanceAudit] = useState<AttendanceAudit>(() => ({ location: null, ip: null, device: getDeviceInfo() }));
 
@@ -258,6 +259,7 @@ export default function EmployeeApp() {
       ]);
       const ap = ((orgSettings as Record<string, unknown>).attendancePolicy ?? {}) as { geofence?: number; geo?: boolean; officeLat?: number; officeLng?: number };
       setGeo({ enabled: !!ap.geo && ap.officeLat != null && ap.officeLng != null, lat: ap.officeLat ?? null, lng: ap.officeLng ?? null, radius: Number(ap.geofence) || 150 });
+      setWeekend(weekendConfigFrom(billing));
       setLeaveRequests(leaveRows.map(mapLeave));
       setAttendanceRows(attRows);
       // Comp-off balance = earned extra-work days (weekend/holiday attendance,
@@ -351,7 +353,7 @@ export default function EmployeeApp() {
 
   const ctx: Ctx = {
     tab, setTab: changeTab, status, checkInTime, checkOutTime, elapsed, now, leaveRequests,
-    live, configured, homeLoading: live && !hasLoaded, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weeklyHours: weeklyHours(attendanceRows),
+    live, configured, homeLoading: live && !hasLoaded, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weekend, weeklyHours: weeklyHours(attendanceRows),
     attendanceAudit, refreshAttendanceAudit,
     timeSynced: clock.synced, timeSource: clock.source,
     fmtClock, fmtDur,
@@ -509,6 +511,7 @@ export default function EmployeeApp() {
         {overlay === 'applyleave' && <ApplyLeaveScreen ctx={ctx} />}
         {overlay === 'reimbursements' && <ReimbursementsScreen ctx={ctx} />}
         {overlay === 'announcements' && <AnnouncementsScreen ctx={ctx} />}
+        {overlay === 'holidays' && <HolidaysScreen ctx={ctx} />}
         {overlay === 'notifications' && <NotificationsScreen ctx={ctx} />}
         {overlay === 'logout' && <LogoutConfirm onCancel={ctx.closeOverlay} onConfirm={ctx.logout} />}
 

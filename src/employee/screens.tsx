@@ -1,8 +1,9 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, Avatar, Card, Pill, StatusBadge } from './ui';
 import type { Ctx } from './data';
 import { useAuth } from '../lib/auth';
-import { getMyEmployee, type Employee } from '../lib/api';
+import { getMyEmployee, type Employee, type AttendanceRow, type Holiday } from '../lib/api';
+import { isOffDate, type WeekendConfig } from '../lib/calendar';
 import { savedMessage } from '../lib/native';
 import { staticMapUrl } from '../lib/maps';
 import { APP_NAME, APP_VERSION } from '../lib/brand';
@@ -339,7 +340,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
       </div>
 
       <div style={{ marginTop: 22 }}>
-        <SectionTitle>Upcoming</SectionTitle>
+        <SectionTitle action={holidays.length > 0 ? 'See all' : undefined} onAction={() => openOverlay('holidays')}>Upcoming holidays</SectionTitle>
         {upcoming && upcomingDate ? (
           <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
             <div style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -357,6 +358,111 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
         )}
       </div>
     </div>
+  );
+}
+
+// ─────────────────────── MONTHLY CALENDAR ────────────────────────────
+const calNav: CSSProperties = { width: 32, height: 32, borderRadius: 9, border: '1px solid var(--hair)', background: 'var(--card)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+
+// A real, navigable month grid that highlights the employee's attendance (with
+// check-in time), company holidays and weekly-offs. Tap a day for its detail.
+function MonthCalendar({ attendanceRows, holidays, weekend }: { attendanceRows: AttendanceRow[]; holidays: Holiday[]; weekend: WeekendConfig }) {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const isoOf = (dt: Date) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  const todayIso = isoOf(now);
+  const [view, setView] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
+  const y = view.getFullYear(), m = view.getMonth();
+  const dayIso = (d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
+  const inThisMonth = todayIso.startsWith(`${y}-${pad(m + 1)}`);
+  const [selected, setSelected] = useState<string | null>(inThisMonth ? todayIso : null);
+
+  const attByDay = useMemo(() => { const map = new Map<string, AttendanceRow>(); for (const r of attendanceRows) map.set(r.day, r); return map; }, [attendanceRows]);
+  const holByDay = useMemo(() => { const map = new Map<string, Holiday>(); for (const h of holidays) map.set(h.date, h); return map; }, [holidays]);
+
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const startPad = new Date(y, m, 1).getDay();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < startPad; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const t24 = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false });
+  const t12 = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '—';
+  const go = (delta: number) => { setSelected(null); setView(new Date(y, m + delta, 1)); };
+
+  let detail: ReactNode = null;
+  if (selected) {
+    const dt = new Date(`${selected}T00:00:00`);
+    const att = attByDay.get(selected);
+    const hol = holByDay.get(selected);
+    const off = isOffDate(dt, weekend);
+    let line: ReactNode;
+    if (att && att.check_in_at) {
+      const hrs = att.work_seconds ? `${Math.floor(att.work_seconds / 3600)}h ${pad(Math.floor((att.work_seconds % 3600) / 60))}m` : '—';
+      line = <span><b style={{ color: 'var(--success)' }}>{att.status || 'Present'}</b> · {t12(att.check_in_at)} → {t12(att.check_out_at)} · {hrs}</span>;
+    } else if (hol) {
+      line = <span><b style={{ color: 'var(--accent)' }}>{hol.name}</b> · {hol.type} holiday</span>;
+    } else if (off) {
+      line = <span style={{ color: 'var(--text-3)' }}>Weekly off</span>;
+    } else if (selected < todayIso) {
+      line = <span style={{ color: 'var(--danger)' }}>Absent — no check-in recorded</span>;
+    } else {
+      line = <span style={{ color: 'var(--text-3)' }}>{selected === todayIso ? 'Today — not checked in yet' : 'Working day'}</span>;
+    }
+    detail = (
+      <div style={{ marginTop: 12, padding: '11px 14px', borderRadius: 'var(--r-card)', background: 'var(--muted-soft)' }}>
+        <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text-1)' }}>{dt.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</div>
+        <div style={{ fontSize: 12.5, marginTop: 3, color: 'var(--text-2)' }}>{line}</div>
+      </div>
+    );
+  }
+
+  return (
+    <Card pad={14}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <button onClick={() => go(-1)} style={calNav} aria-label="Previous month"><Icon name="chevronLeft" size={18} color="var(--text-2)" /></button>
+        <div style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--text-1)' }}>{view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>
+        <button onClick={() => go(1)} style={calNav} aria-label="Next month"><Icon name="chevronRight" size={18} color="var(--text-2)" /></button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, marginBottom: 4 }}>
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w, i) => <div key={i} style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)' }}>{w}</div>)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
+        {cells.map((d, i) => {
+          if (d == null) return <div key={i} />;
+          const iso = dayIso(d);
+          const att = attByDay.get(iso);
+          const hol = holByDay.get(iso);
+          const off = isOffDate(new Date(`${iso}T00:00:00`), weekend);
+          const present = !!(att && att.check_in_at);
+          let bg = 'transparent', color = 'var(--text-1)';
+          if (present) { bg = 'var(--success-soft)'; color = 'var(--success)'; }
+          else if (hol) { bg = 'var(--accent-soft)'; color = 'var(--accent)'; }
+          else if (off) { bg = 'var(--muted-soft)'; color = 'var(--text-3)'; }
+          else if (iso < todayIso) color = 'var(--danger)';
+          const isSel = iso === selected, isToday = iso === todayIso;
+          return (
+            <button key={i} onClick={() => setSelected(iso)} title={hol?.name} style={{
+              aspectRatio: '1', borderRadius: 10, padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+              background: bg, color, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative',
+              border: isSel ? '1.5px solid var(--accent)' : isToday ? '1.5px solid var(--text-3)' : '1.5px solid transparent',
+            }}>
+              {d}
+              {present && att?.check_in_at && <span style={{ fontSize: 8, fontWeight: 600, opacity: 0.9, lineHeight: 1, marginTop: 1 }}>{t24(att.check_in_at)}</span>}
+              {hol && !present && <span style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: '50%', background: 'var(--accent)' }} />}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
+        {([['Present', 'var(--success)'], ['Holiday', 'var(--accent)'], ['Weekend', 'var(--text-3)'], ['Absent', 'var(--danger)']] as const).map(([l, c]) => (
+          <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 3, background: c }} />{l}
+          </span>
+        ))}
+      </div>
+      {detail}
+    </Card>
   );
 }
 
@@ -440,6 +546,11 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
           ))}
         </div>
       </Card>
+
+      <div style={{ marginTop: 22 }}>
+        <SectionTitle>Calendar</SectionTitle>
+        <MonthCalendar attendanceRows={ctx.attendanceRows} holidays={ctx.holidays} weekend={ctx.weekend} />
+      </div>
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle action={ctx.live && ctx.attendanceRows.length > 0 ? 'Export' : undefined} onAction={() => void exportMine()}>Daily log</SectionTitle>

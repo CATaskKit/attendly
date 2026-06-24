@@ -1,6 +1,7 @@
 // Demo data + shared context types for the employee app.
 import type { AttendanceRow, Employee, Holiday, LeaveBalance, Notification, Reimbursement, Announcement } from '../lib/api';
 import type { AttendanceAudit } from '../lib/attendanceAudit';
+import type { WeekendConfig } from '../lib/calendar';
 
 export type ReimbursementDraft = { category: string; amount: number; spentOn: string; reason: string; files: File[] };
 
@@ -69,6 +70,7 @@ export type Ctx = {
   attendanceRows: AttendanceRow[];
   leaveBalances: LeaveBalance[];
   holidays: Holiday[];
+  weekend: WeekendConfig;
   weeklyHours: number[];
   attendanceAudit: AttendanceAudit;
   refreshAttendanceAudit: () => Promise<AttendanceAudit>;
