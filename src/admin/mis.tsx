@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { AIcon, AAvatar, ACard, APill, ABadge, PageHead, BtnGhost, BtnPrimary, Spinner } from './ui';
 import { supabase } from '../lib/supabase';
 import type { Employee, LeaveRow, Holiday } from '../lib/api';
-import { setEmployeeBasicSalary } from '../lib/api';
+import { setEmployeeBasicSalary, getOrganizationSettings, setOrganizationSetting } from '../lib/api';
 import { countExtraDays } from '../lib/compoff';
 import { countWorkingDays, type WeekendConfig } from '../lib/calendar';
+import { payrollPolicyFrom, cycleRange, workingDaysInRange, isUnpaidLeave, leaveDaysInCycle, DEFAULT_PAYROLL, type PayrollPolicy } from '../lib/payroll';
 import { downloadSheets } from '../lib/export';
 import { lateThresholdMinutes, type ShiftPolicy } from '../lib/shift';
 import CheckinMapModal from './CheckinMapModal';
@@ -198,67 +199,154 @@ export function AttendanceMIS({ orgId, employees, leave, holidays, weekend, shif
 // ── PAYROLL MIS ──────────────────────────────────────────────────────
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 
-export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canManage, onToast }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[]; weekend: WeekendConfig; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void }) {
-  const { rows, loading } = useMonthAttendance(orgId);
-  const active = employees.filter((e) => e.status === 'Active');
-  const now = new Date();
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const totalDays = countWorkingDays(now.getFullYear(), now.getMonth(), 1, lastDay, weekend);
-  // Working days elapsed so far — future working days aren't "absent" yet, so
-  // they must not be deducted mid-month.
-  const elapsed = countWorkingDays(now.getFullYear(), now.getMonth(), 1, Math.min(now.getDate(), lastDay), weekend);
-  const leaveByCode = useMemo(() => leaveDaysByCode(leave), [leave]);
-  const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
-  const [payExtra, setPayExtra] = useState(false); // pay extra (weekend/holiday) days as overtime
+// Pay-month picker options: next month first, then the previous 13 months.
+function monthOptions(): { key: string; label: string }[] {
+  const out: { key: string; label: string }[] = [];
+  const base = new Date();
+  for (let i = -1; i <= 13; i++) {
+    const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+    out.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) });
+  }
+  return out;
+}
 
-  // Basic salary lives on employees.basic_salary (shared & persisted). A local
-  // override keeps the input snappy until the parent re-fetches employees.
+// Attendance days within an explicit cycle range (drives optional overtime pay).
+function useCycleAttendance(orgId: string | null, startISO: string, endISO: string) {
+  const [rows, setRows] = useState<{ employee_id: string; day: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!supabase || !orgId) { setRows([]); setLoading(false); return; }
+    setLoading(true);
+    supabase.from('attendance').select('employee_id,day').eq('org_id', orgId).gte('day', startISO).lte('day', endISO)
+      .then(({ data, error }) => { if (error) console.error(error); setRows((data as { employee_id: string; day: string }[]) ?? []); setLoading(false); });
+  }, [orgId, startISO, endISO]);
+  return { rows, loading };
+}
+
+const ctrlWrap: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
+const ctrlLabel: CSSProperties = { fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em' };
+const selectStyle: CSSProperties = { height: 38, borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', padding: '0 12px', fontSize: 13, fontWeight: 700, color: 'var(--ink-1)', fontFamily: 'inherit', outline: 'none' };
+
+export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canManage, onToast }: { orgId: string | null; employees: Employee[]; leave: LeaveRow[]; holidays: Holiday[]; weekend: WeekendConfig; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void }) {
+  const active = employees.filter((e) => e.status === 'Active');
+  const months = useMemo(monthOptions, []);
+  const [sel, setSel] = useState(`${new Date().getFullYear()}-${new Date().getMonth()}`);
+  const [selY, selM] = sel.split('-').map(Number);
+
+  // Company payroll policy — cycle start day + per-day basis — persisted in org
+  // settings so the company decides it once. Managers can change it inline.
+  const [policy, setPolicy] = useState<PayrollPolicy>(DEFAULT_PAYROLL);
+  useEffect(() => { if (orgId) getOrganizationSettings(orgId).then((s) => setPolicy(payrollPolicyFrom(s))).catch(() => {}); }, [orgId]);
+  const savePolicy = (next: PayrollPolicy) => {
+    setPolicy(next);
+    if (orgId) setOrganizationSetting(orgId, 'payrollPolicy', next).catch((err) => { console.error(err); onToast('Could not save payroll setting', 'red', 'xCircle'); });
+  };
+
+  const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
+  const cycle = useMemo(() => cycleRange(selY, selM, policy.cycleStartDay), [selY, selM, policy.cycleStartDay]);
+  const workingDays = useMemo(() => workingDaysInRange(cycle.start, cycle.end, weekend, holidaySet), [cycle, weekend, holidaySet]);
+  const divisor = policy.dayBasis === 'working' ? workingDays : cycle.calendarDays;
+  const basisLabel = policy.dayBasis === 'working' ? 'working days' : 'calendar days';
+
+  const { rows: attRows, loading } = useCycleAttendance(orgId, cycle.startISO, cycle.endISO);
+
+  // Approved UNPAID leave days per employee code, within the selected cycle.
+  const unpaidByCode = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const l of leave) {
+      if (l.status !== 'Approved' || !l.code || !isUnpaidLeave(l.type)) continue;
+      const d = leaveDaysInCycle(l.from_date, l.to_date, l.days, cycle);
+      if (d > 0) out[l.code] = (out[l.code] ?? 0) + d;
+    }
+    return out;
+  }, [leave, cycle]);
+
+  // Inline basic-salary edits (persisted to employees.basic_salary).
   const [edits, setEdits] = useState<Record<string, number>>({});
   const setBasic = (id: string, v: number) => {
     setEdits((p) => ({ ...p, [id]: v }));
     setEmployeeBasicSalary(id, v).catch((err) => { console.error(err); onToast('Could not save salary', 'red', 'xCircle'); });
   };
+
+  // HR manual leave adjustment per employee: + adds unpaid days, − waives them.
+  const [adj, setAdj] = useState<Record<string, number>>({});
+  const [payExtra, setPayExtra] = useState(false);
   const [processed, setProcessed] = useState(false);
+  // A new cycle/month is a fresh run — clear adjustments and processed state.
+  useEffect(() => { setAdj({}); setPayExtra(false); setProcessed(false); }, [sel, policy.cycleStartDay]);
 
   const data = active.map((e) => {
-    const mine = rows.filter((r) => r.employee_id === e.id);
-    const present = new Set(mine.map((r) => r.day)).size;
-    const lv = leaveByCode[e.code] ?? 0;
     const basic = edits[e.id] ?? (Number(e.basic_salary) || 0);
-    const perDay = totalDays > 0 ? basic / totalDays : 0;
-    const extra = countExtraDays(mine.map((r) => r.day), holidaySet, weekend); // weekend/holiday work → comp-off, not regular attendance
-    // Loss-of-pay = working days elapsed not covered by WEEKDAY attendance or paid leave.
-    const lop = Math.max(0, elapsed - Math.max(0, present - extra) - lv);
-    const paid = Math.max(0, totalDays - lop);
-    const deduction = perDay * lop;
+    const unpaid = unpaidByCode[e.code] ?? 0;
+    const adjust = adj[e.id] ?? 0;
+    const lop = Math.max(0, unpaid + adjust);          // never negative pay-loss
+    const perDay = divisor > 0 ? basic / divisor : 0;  // guard divide-by-zero
+    const deduction = Math.min(basic, perDay * lop);   // never deduct more than the salary
+    const extra = countExtraDays(attRows.filter((r) => r.employee_id === e.id).map((r) => r.day), holidaySet, weekend);
     const overtime = payExtra ? perDay * extra : 0;
     const payable = Math.max(0, basic - deduction) + overtime;
-    return { e, basic, paid, lop, extra, overtime, deduction, leave: lv, payable };
+    return { e, basic, unpaid, adjust, lop, perDay, deduction, extra, overtime, payable };
   });
   const totalPayable = data.reduce((a, r) => a + r.payable, 0);
   const totalBasic = data.reduce((a, r) => a + r.basic, 0);
   const deductions = data.reduce((a, r) => a + r.deduction, 0);
   const totalOvertime = data.reduce((a, r) => a + r.overtime, 0);
   const totalExtra = data.reduce((a, r) => a + r.extra, 0);
+  const totalLop = data.reduce((a, r) => a + r.lop, 0);
+  const missingSalary = data.filter((r) => r.basic <= 0).length;
 
-  const doProcess = () => { setProcessed(true); onToast(`Salary processed · ${inr(totalPayable)} queued for ${data.length} employees`); };
+  const doProcess = () => {
+    if (data.every((r) => r.basic <= 0)) { onToast('Set basic salary before processing', 'amber', 'wallet'); return; }
+    setProcessed(true);
+    onToast(`Salary processed · ${inr(totalPayable)} for ${data.length} employees`);
+  };
   const exportXlsx = async () => {
-    const rows = data.map((r) => ({
+    const rowsX = data.map((r) => ({
       Employee: r.e.name, Code: r.e.code, Department: r.e.dept || '',
-      'Basic salary': Math.round(r.basic), 'Working days': totalDays, 'Paid days': r.paid,
-      'LOP days': r.lop, 'Extra days': r.extra, 'LOP deduction': Math.round(r.deduction),
-      Overtime: Math.round(r.overtime), 'Salary payable': Math.round(r.payable),
+      'Basic salary': Math.round(r.basic), 'Cycle': cycle.label, 'Cycle days': divisor, 'Day basis': basisLabel,
+      'Unpaid leave': r.unpaid, 'HR adjustment': r.adjust, 'LOP days': r.lop,
+      'Per-day rate': Math.round(r.perDay), 'Deduction': Math.round(r.deduction),
+      'Extra days': r.extra, 'Overtime': Math.round(r.overtime), 'Salary payable': Math.round(r.payable),
     }));
-    try { await downloadSheets(`Payroll_${MONTH_LABEL.replace(/[^a-z0-9]+/gi, '_')}.xlsx`, [{ name: 'Payroll', rows }]); }
+    try { await downloadSheets(`Payroll_${cycle.label.replace(/[^a-z0-9]+/gi, '_')}.xlsx`, [{ name: 'Payroll', rows: rowsX }]); }
     catch (e) { console.error(e); onToast('Export failed', 'red', 'xCircle'); }
   };
 
   return (
     <div>
-      <PageHead title="Payroll" sub={`${MONTH_LABEL} pay run · ${totalDays} working days`}>
+      <PageHead title="Payroll" sub={`${cycle.label} · ${divisor} ${basisLabel}`}>
         <BtnGhost icon="download" onClick={exportXlsx} disabled={loading || active.length === 0}>Excel</BtnGhost>
         {canManage && (processed ? <BtnGhost icon="checkCircle">Download payslips</BtnGhost> : <BtnPrimary icon="wallet" onClick={doProcess}>Process salary</BtnPrimary>)}
       </PageHead>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 16, alignItems: 'flex-end' }}>
+        <label style={ctrlWrap}>
+          <span style={ctrlLabel}>Pay month</span>
+          <select value={sel} onChange={(e) => setSel(e.target.value)} style={{ ...selectStyle, minWidth: 150 }}>
+            {months.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
+        </label>
+        <label style={ctrlWrap}>
+          <span style={ctrlLabel}>Cycle starts on day</span>
+          <input type="number" min={1} max={28} value={policy.cycleStartDay} disabled={!canManage}
+            onChange={(e) => savePolicy({ ...policy, cycleStartDay: Math.min(28, Math.max(1, Math.round(Number(e.target.value)) || 1)) })}
+            title="1 = calendar month · e.g. 26 = 26th to 25th next month"
+            style={{ ...selectStyle, width: 92, textAlign: 'right' }} />
+        </label>
+        <div style={ctrlWrap}>
+          <span style={ctrlLabel}>Per-day rate basis</span>
+          <div style={{ display: 'inline-flex', background: 'var(--soft)', borderRadius: 9, padding: 3, border: '1px solid var(--line)' }}>
+            {(['calendar', 'working'] as const).map((b) => (
+              <button key={b} disabled={!canManage} onClick={() => savePolicy({ ...policy, dayBasis: b })}
+                style={{ border: 'none', cursor: canManage ? 'pointer' : 'default', padding: '7px 13px', borderRadius: 7, fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+                  background: policy.dayBasis === b ? 'var(--panel)' : 'transparent', color: policy.dayBasis === b ? 'var(--ink-1)' : 'var(--ink-3)', boxShadow: policy.dayBasis === b ? 'var(--card-shadow)' : 'none' }}>
+                {b === 'calendar' ? `Calendar (${cycle.calendarDays})` : `Working (${workingDays})`}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {loading ? <Spinner label="Computing payroll…" /> : active.length === 0 ? <EmptyTable label="No active employees" /> : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: 14, marginBottom: 16 }}>
@@ -273,7 +361,7 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
             <ACard pad={20}>
               <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 700 }}>Employees</div>
               <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.03em', marginTop: 8, lineHeight: 1 }}>{data.length}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600, marginTop: 8 }}>Gross {inr(totalBasic)}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 600, marginTop: 8 }}>Gross {inr(totalBasic)} · {totalLop} LOP day{totalLop === 1 ? '' : 's'}</div>
             </ACard>
             <ACard pad={20} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
               <div>
@@ -286,9 +374,16 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '12px 16px', borderRadius: 12, background: processed ? 'var(--green-soft)' : 'var(--soft)', border: '1px solid var(--line)' }}>
             <AIcon name={processed ? 'checkCircle' : 'shield'} size={18} color={processed ? 'var(--green)' : 'var(--ink-3)'} />
             <span style={{ fontSize: 13, color: processed ? 'var(--green)' : 'var(--ink-2)', fontWeight: 600 }}>
-              {processed ? `Salary processed for ${data.length} employees. Payslips generated and disbursement queued.` : `Salary payable = Basic − (Basic ÷ ${totalDays} working days) × LOP days. Present days and approved leave are paid; only absences (${elapsed} working days elapsed) reduce pay. Edit basic salary inline, then process.`}
+              {processed ? `Salary processed for ${data.length} employees for ${cycle.label}.` : `Salary payable = Basic − (Basic ÷ ${divisor} ${basisLabel}) × LOP days. Only unpaid leave (+ HR adjustment) is deducted — paid leave and attendance gaps don't reduce pay.`}
             </span>
           </div>
+
+          {missingSalary > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '11px 16px', borderRadius: 12, background: 'var(--amber-soft)', border: '1px solid var(--line)' }}>
+              <AIcon name="wallet" size={17} color="var(--amber)" />
+              <span style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 600 }}>{missingSalary} employee{missingSalary === 1 ? '' : 's'} {missingSalary === 1 ? 'has' : 'have'} no basic salary set — shown as ₹0 until you add it.</span>
+            </div>
+          )}
 
           {(totalExtra > 0 || payExtra) && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '11px 16px', borderRadius: 12, background: payExtra ? 'var(--green-soft)' : 'var(--soft)', border: '1px solid var(--line)', cursor: canManage ? 'pointer' : 'default' }}>
@@ -301,19 +396,23 @@ export function PayrollMIS({ orgId, employees, leave, holidays, weekend, canMana
           )}
 
           <TableShell
-            head={['Employee', { t: 'Basic salary', r: true }, { t: 'Working days', r: true }, { t: 'Paid days', r: true }, { t: 'LOP days', r: true }, { t: 'Extra days', r: true }, { t: 'Salary payable', r: true }]}
-            foot={<tr><td style={{ ...td, fontWeight: 800, color: 'var(--ink-1)', borderBottom: 'none' }}>Total payable · {data.length}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{inr(totalBasic)}</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>{totalExtra}</td><td style={{ ...tdNum, borderBottom: 'none', fontSize: 15, fontWeight: 800, color: 'var(--green)' }}>{inr(totalPayable)}</td></tr>}>
+            head={['Employee', { t: 'Basic salary', r: true }, { t: 'Unpaid lv', r: true }, { t: 'HR adj ±', r: true }, { t: 'LOP days', r: true }, { t: 'Deduction', r: true }, { t: 'Salary payable', r: true }]}
+            foot={<tr><td style={{ ...td, fontWeight: 800, color: 'var(--ink-1)', borderBottom: 'none' }}>Total · {data.length}</td><td style={{ ...tdNum, borderBottom: 'none' }}>{inr(totalBasic)}</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>—</td><td style={{ ...tdNum, borderBottom: 'none' }}>{totalLop}</td><td style={{ ...tdNum, borderBottom: 'none', color: 'var(--red)' }}>{inr(deductions)}</td><td style={{ ...tdNum, borderBottom: 'none', fontSize: 15, fontWeight: 800, color: 'var(--green)' }}>{inr(totalPayable)}</td></tr>}>
             {data.map((r) => (
               <tr key={r.e.id}>
                 <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><AAvatar name={r.e.name} size={32} /><div><div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-1)' }}>{r.e.name}</div><div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{r.e.dept || '—'}</div></div></div></td>
                 <td style={{ ...tdNum, padding: '8px 18px' }}>
-                  <input type="number" value={r.basic} disabled={!canManage} onChange={(ev) => setBasic(r.e.id, Number(ev.target.value) || 0)}
+                  <input type="number" min={0} value={r.basic} disabled={!canManage} onChange={(ev) => setBasic(r.e.id, Math.max(0, Number(ev.target.value) || 0))}
                     style={{ width: 110, textAlign: 'right', height: 34, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', padding: '0 10px', fontSize: 13, fontWeight: 700, color: 'var(--ink-1)', fontFamily: 'inherit', outline: 'none', fontVariantNumeric: 'tabular-nums' }} />
                 </td>
-                <td style={tdNum}>{totalDays}</td>
-                <td style={tdNum}>{r.paid}</td>
-                <td style={{ ...tdNum, color: r.lop ? 'var(--red)' : 'var(--ink-3)' }}>{r.lop}</td>
-                <td style={{ ...tdNum, color: r.extra ? 'var(--green)' : 'var(--ink-3)' }}>{r.extra}{r.overtime > 0 ? ` · ${inr(r.overtime)}` : ''}</td>
+                <td style={{ ...tdNum, color: r.unpaid ? 'var(--red)' : 'var(--ink-3)' }}>{r.unpaid || '—'}</td>
+                <td style={{ ...tdNum, padding: '8px 18px' }}>
+                  <input type="number" value={r.adjust} disabled={!canManage} onChange={(ev) => setAdj((p) => ({ ...p, [r.e.id]: Number(ev.target.value) || 0 }))}
+                    title="Add (+) or waive (−) unpaid leave days for this run"
+                    style={{ width: 76, textAlign: 'right', height: 34, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', padding: '0 10px', fontSize: 13, fontWeight: 700, color: 'var(--ink-1)', fontFamily: 'inherit', outline: 'none', fontVariantNumeric: 'tabular-nums' }} />
+                </td>
+                <td style={{ ...tdNum, color: r.lop ? 'var(--red)' : 'var(--ink-3)' }}>{r.lop || '—'}</td>
+                <td style={{ ...tdNum, color: r.deduction ? 'var(--red)' : 'var(--ink-3)' }}>{r.deduction ? `−${inr(r.deduction)}` : '—'}{r.overtime > 0 ? ` · +${inr(r.overtime)} OT` : ''}</td>
                 <td style={{ ...tdNum, fontWeight: 800, color: 'var(--ink-1)' }}>{inr(r.payable)}</td>
               </tr>
             ))}
