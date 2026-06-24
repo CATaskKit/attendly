@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type TouchEvent as RTouchEvent } from 'react';
 import { Icon, Avatar, Card, Pill, StatusBadge } from './ui';
 import type { Ctx } from './data';
 import { useAuth } from '../lib/auth';
@@ -187,11 +187,11 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
   return (
     <div>
       {workspaceName && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '2px 2px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '2px 2px 12px' }}>
           {workspaceLogo
-            ? <img src={workspaceLogo} alt={workspaceName} style={{ width: 26, height: 26, borderRadius: 7, objectFit: 'contain', background: 'var(--card)' }} />
-            : <div style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>{workspaceName.charAt(0).toUpperCase()}</div>}
-          <span style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-2)', letterSpacing: '-0.01em' }}>{workspaceName}</span>
+            ? <img src={workspaceLogo} alt={workspaceName} style={{ width: 38, height: 38, borderRadius: 10, objectFit: 'contain', background: 'var(--card)' }} />
+            : <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800 }}>{workspaceName.charAt(0).toUpperCase()}</div>}
+          <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>{workspaceName}</span>
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 2px 18px' }}>
@@ -391,6 +391,18 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth 
   const t12 = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '—';
   const go = (delta: number) => onChangeMonth(delta);
 
+  // Swipe horizontally to change month (left → next, right → previous).
+  const touchX = useRef<number | null>(null);
+  const touchY = useRef<number | null>(null);
+  const onTouchStart = (e: RTouchEvent<HTMLDivElement>) => { touchX.current = e.changedTouches[0].clientX; touchY.current = e.changedTouches[0].clientY; };
+  const onTouchEnd = (e: RTouchEvent<HTMLDivElement>) => {
+    if (touchX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchX.current;
+    const dy = e.changedTouches[0].clientY - (touchY.current ?? 0);
+    touchX.current = null;
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4) go(dx < 0 ? 1 : -1);
+  };
+
   let detail: ReactNode = null;
   if (selected) {
     const dt = new Date(`${selected}T00:00:00`);
@@ -419,15 +431,20 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth 
   }
 
   return (
-    <Card pad={14}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <button onClick={() => go(-1)} style={calNav} aria-label="Previous month"><Icon name="chevronLeft" size={18} color="var(--text-2)" /></button>
-        <div style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--text-1)' }}>{view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>
-        <button onClick={() => go(1)} style={calNav} aria-label="Next month"><Icon name="chevronRight" size={18} color="var(--text-2)" /></button>
+    <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+    <Card pad={0} style={{ overflow: 'hidden' }}>
+      {/* Tinted heading bar: month navigation + weekday labels */}
+      <div style={{ background: 'var(--accent-soft)', padding: '12px 14px 10px', borderBottom: '1px solid var(--hair)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <button onClick={() => go(-1)} style={calNav} aria-label="Previous month"><Icon name="chevronLeft" size={18} color="var(--accent)" /></button>
+          <div style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>{view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>
+          <button onClick={() => go(1)} style={calNav} aria-label="Next month"><Icon name="chevronRight" size={18} color="var(--accent)" /></button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w, i) => <div key={i} style={{ textAlign: 'center', fontSize: 11, fontWeight: 800, color: 'var(--accent)', letterSpacing: '0.02em' }}>{w}</div>)}
+        </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, marginBottom: 4 }}>
-        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w, i) => <div key={i} style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)' }}>{w}</div>)}
-      </div>
+      <div style={{ padding: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
         {cells.map((d, i) => {
           if (d == null) return <div key={i} />;
@@ -463,7 +480,9 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth 
         ))}
       </div>
       {detail}
+      </div>
     </Card>
+    </div>
   );
 }
 

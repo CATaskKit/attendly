@@ -223,7 +223,14 @@ export default function AdminApp() {
       {/* MAIN */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <header style={{ height: 66, flexShrink: 0, background: 'var(--panel)', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 16, padding: '0 28px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 40, padding: '0 14px', borderRadius: 11, background: 'var(--bg)', width: 320, maxWidth: '40%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            {billing?.logo_url
+              ? <img src={billing.logo_url} alt="" style={{ width: 34, height: 34, borderRadius: 9, objectFit: 'contain', background: 'var(--bg)' }} />
+              : <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800 }}>{(billing?.display_name || billing?.name || 'W').charAt(0).toUpperCase()}</div>}
+            <span style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.01em', whiteSpace: 'nowrap', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{billing?.display_name || billing?.name || 'Workspace'}</span>
+            <div style={{ width: 1, height: 28, background: 'var(--line)', margin: '0 6px' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 40, padding: '0 14px', borderRadius: 11, background: 'var(--bg)', width: 320, maxWidth: '34%' }}>
             <AIcon name="search" size={18} color="var(--ink-3)" />
             <input placeholder="Search employees, requests..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ border: 'none', outline: 'none', background: 'none', fontSize: 13.5, color: 'var(--ink-1)', width: '100%' }} />
           </div>
