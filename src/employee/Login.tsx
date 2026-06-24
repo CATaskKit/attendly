@@ -364,10 +364,21 @@ export default function Login() {
     navigate(landingFor(role, profile?.org_id ?? null), { replace: true });
   }, [authed, loading, role, profile, isResetLink, navigate]);
 
+  // While auth is resolving — or when already signed in and about to redirect —
+  // show a branded loader instead of flashing the login form. Keep the same
+  // PhoneFrame/wrapper mounted and only swap the inner child.
+  const showLoader = loading || (authed && !isResetLink);
   return (
     <PhoneFrame dark={DEFAULT_TWEAKS.dark}>
       <div style={{ position: 'relative', height: '100%', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", WebkitFontSmoothing: 'antialiased', ...vars }}>
-        <LoginScreen />
+        {showLoader ? (
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: 'var(--bg)' }}>
+            <OnTimeMark size={66} />
+            <span className="login-spinner login-spinner-dark" />
+          </div>
+        ) : (
+          <LoginScreen />
+        )}
       </div>
     </PhoneFrame>
   );

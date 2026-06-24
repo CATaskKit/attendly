@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { SITE_URL } from './brand';
 
@@ -81,7 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return;
       setSession(data.session);
-      if (data.session) await loadProfile(data.session.user.id);
+      // On native the landing is always the employee app, so don't block entry
+      // on the profile fetch — load it in the background. Web waits because it
+      // needs the role to route (owner/HR → admin console).
+      if (data.session) {
+        if (Capacitor.isNativePlatform()) void loadProfile(data.session.user.id);
+        else await loadProfile(data.session.user.id);
+      }
       setLoading(false);
     });
 
