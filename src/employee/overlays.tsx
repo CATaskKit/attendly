@@ -698,7 +698,7 @@ export function ReimbursementsScreen({ ctx }: { ctx: Ctx }) {
               {r.status === 'Pending' && <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 6 }}>{r.stage === 'manager' ? 'Awaiting manager approval' : 'Awaiting HR approval'}</div>}
               {r.status === 'Paid' && <div style={{ fontSize: 11.5, color: 'var(--success)', fontWeight: 600, marginTop: 6 }}>Paid{r.paid_ref ? ` · ref ${r.paid_ref}` : ''}</div>}
               {r.attachments.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}><Icon name="paperclip" size={13} color="var(--text-3)" />{r.attachments.length} receipt{r.attachments.length === 1 ? '' : 's'}</div>}
-              {r.status === 'Pending' && ctx.role === 'employee' && (
+              {r.status === 'Pending' && (
                 <button onClick={() => { if (window.confirm('Withdraw this claim?')) cancelReimbursement(r.id); }}
                   style={{ width: '100%', marginTop: 10, height: 38, borderRadius: 10, border: '1.5px solid var(--danger)', background: 'transparent', color: 'var(--danger)', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                   <Icon name="x" size={15} color="var(--danger)" strokeWidth={2.4} /> Cancel claim

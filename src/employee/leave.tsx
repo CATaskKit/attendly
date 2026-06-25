@@ -57,7 +57,7 @@ export function LeaveScreen({ ctx }: { ctx: Ctx }) {
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle>Requests</SectionTitle>
-        {ctx.leaveRequests.map((r, i) => <LeaveRow key={r.id || i} r={r} onCancel={ctx.role === 'employee' ? ctx.cancelLeave : undefined} />)}
+        {ctx.leaveRequests.map((r, i) => <LeaveRow key={r.id || i} r={r} onCancel={ctx.cancelLeave} />)}
       </div>
       <div style={{ height: 80 }} />
 

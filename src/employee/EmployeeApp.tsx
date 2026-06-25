@@ -276,8 +276,10 @@ export default function EmployeeApp() {
         ? [...balances, { type: 'Comp off', allotted: earnedComp, used: compUsed, pending: compPending, available: Math.max(0, earnedComp - compUsed - compPending) }]
         : balances);
       setHolidays(holidayRows);
-      setTeamRows(approvals);
-      setTeamRequests(approvals.map((r) => mapTeamLeave(r, role === 'manager')));
+      // A cancelled request is revoked — keep it out of the approvers' queue.
+      const liveApprovals = approvals.filter((r) => r.status !== 'Cancelled');
+      setTeamRows(liveApprovals);
+      setTeamRequests(liveApprovals.map((r) => mapTeamLeave(r, role === 'manager')));
       setReimbursements(reimbRows);
       // Approvers also load the org's pending claims to action (RLS-scoped to org).
       if (canApproveTeam) {
