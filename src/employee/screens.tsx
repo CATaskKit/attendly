@@ -374,7 +374,7 @@ const calNav: CSSProperties = { width: 32, height: 32, borderRadius: 9, border: 
 
 // A real, navigable month grid that highlights the employee's attendance (with
 // check-in time), company holidays and weekly-offs. Tap a day for its detail.
-function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth, selected, onSelect }: { attendanceRows: AttendanceRow[]; holidays: Holiday[]; weekend: WeekendConfig; view: Date; onChangeMonth: (delta: number) => void; selected: string | null; onSelect: (iso: string) => void }) {
+function MonthCalendar({ attendanceRows, holidays, weekend, leaveDays, view, onChangeMonth, selected, onSelect }: { attendanceRows: AttendanceRow[]; holidays: Holiday[]; weekend: WeekendConfig; leaveDays: Record<string, 'Approved' | 'Pending'>; view: Date; onChangeMonth: (delta: number) => void; selected: string | null; onSelect: (iso: string) => void }) {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const isoOf = (dt: Date) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
@@ -416,6 +416,8 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth,
     if (att && att.check_in_at) {
       const hrs = att.work_seconds ? `${Math.floor(att.work_seconds / 3600)}h ${pad(Math.floor((att.work_seconds % 3600) / 60))}m` : '—';
       line = <span><b style={{ color: 'var(--success)' }}>{att.status || 'Present'}</b> · {t12(att.check_in_at)} → {t12(att.check_out_at)} · {hrs}</span>;
+    } else if (leaveDays[selected]) {
+      line = <span><b style={{ color: 'var(--warning)' }}>{leaveDays[selected] === 'Approved' ? 'On leave' : 'Leave requested'}</b>{leaveDays[selected] === 'Pending' ? ' · awaiting approval' : ''}</span>;
     } else if (hol) {
       line = <span><b style={{ color: 'var(--accent)' }}>{hol.name}</b> · {hol.type} holiday</span>;
     } else if (off) {
@@ -456,8 +458,10 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth,
           const hol = holByDay.get(iso);
           const off = isOffDate(new Date(`${iso}T00:00:00`), weekend);
           const present = !!(att && att.check_in_at);
+          const leave = leaveDays[iso];
           let bg = 'transparent', color = 'var(--text-1)';
           if (present) { bg = 'var(--success-soft)'; color = 'var(--success)'; }
+          else if (leave) { bg = 'var(--warning-soft)'; color = 'var(--warning)'; }
           else if (hol) { bg = 'var(--accent-soft)'; color = 'var(--accent)'; }
           else if (off) { bg = 'var(--muted-soft)'; color = 'var(--text-3)'; }
           else if (iso < todayIso) color = 'var(--danger)';
@@ -474,13 +478,14 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth,
               <span style={{ lineHeight: 1 }}>{d}</span>
               {workedH > 0 && <span style={{ fontSize: 8.5, fontWeight: 800, lineHeight: 1, color: isSel ? 'rgba(255,255,255,0.92)' : 'var(--success)' }}>{workedH.toFixed(1)}h</span>}
               {present && !workedH && <span style={{ width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--success)' }} />}
-              {hol && !present && <span style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--accent)' }} />}
+              {leave && !present && <span style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--warning)', opacity: leave === 'Pending' ? 0.55 : 1 }} />}
+              {hol && !present && !leave && <span style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--accent)' }} />}
             </button>
           );
         })}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
-        {([['Present', 'var(--success)'], ['Holiday', 'var(--accent)'], ['Weekend', 'var(--text-3)'], ['Absent', 'var(--danger)']] as const).map(([l, c]) => (
+        {([['Present', 'var(--success)'], ['Leave', 'var(--warning)'], ['Holiday', 'var(--accent)'], ['Weekend', 'var(--text-3)'], ['Absent', 'var(--danger)']] as const).map(([l, c]) => (
           <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>
             <span style={{ width: 9, height: 9, borderRadius: 3, background: c }} />{l}
           </span>
@@ -570,6 +575,16 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
       })
     : demoLog;
   const selLabel = new Date(`${selectedDay}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  // Map each day covered by a pending/approved leave → its status, for the calendar.
+  const leaveDays = useMemo(() => {
+    const map: Record<string, 'Approved' | 'Pending'> = {};
+    for (const lr of ctx.leaveRequests) {
+      if ((lr.status !== 'Approved' && lr.status !== 'Pending') || !lr.fromDate || !lr.toDate) continue;
+      const d = new Date(`${lr.fromDate}T00:00:00`); const end = new Date(`${lr.toDate}T00:00:00`);
+      while (d <= end) { const iso = isoOf(d); if (map[iso] !== 'Approved') map[iso] = lr.status as 'Approved' | 'Pending'; d.setDate(d.getDate() + 1); }
+    }
+    return map;
+  }, [ctx.leaveRequests]); // eslint-disable-line react-hooks/exhaustive-deps
   const exportMine = async () => {
     const rows = monthRows.map((r) => ({
       Date: r.day,
@@ -618,7 +633,7 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle>Calendar</SectionTitle>
-        <MonthCalendar attendanceRows={monthRows} holidays={ctx.holidays} weekend={ctx.weekend} view={view} onChangeMonth={changeMonth} selected={selectedDay} onSelect={setSelectedDay} />
+        <MonthCalendar attendanceRows={monthRows} holidays={ctx.holidays} weekend={ctx.weekend} leaveDays={leaveDays} view={view} onChangeMonth={changeMonth} selected={selectedDay} onSelect={setSelectedDay} />
       </div>
 
       <div style={{ marginTop: 22 }}>

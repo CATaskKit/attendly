@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, Card, Pill, SlideToConfirm } from './ui';
 import { locationMessage } from '../lib/attendanceAudit';
+import { isOffDate } from '../lib/calendar';
 import { isNative, openLocationSettings, savedMessage } from '../lib/native';
 import { MapView, VRow, SelfieTile } from './screens';
 import type { Ctx } from './data';
@@ -232,14 +233,34 @@ export function ApplyLeaveScreen({ ctx }: { ctx: Ctx }) {
   const days = half ? 0.5 : dayDiff;
   const firstAttachment = attachments[0]?.name ?? null;
   const exceedsBalance = ctx.live && t?.available != null && days > t.available;
-  const canSubmit = !!t && !exceedsBalance;
+
+  // Validations: To ≥ From; not entirely on holidays/weekly-offs; no overlap
+  // with an existing pending/approved leave.
+  const effTo = half ? fromDate : toDate;
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const localIso = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const compulsoryHol = useMemo(() => new Set(ctx.holidays.filter((h) => (h.type || '').toLowerCase() !== 'optional').map((h) => h.date)), [ctx.holidays]);
+  const workingDaysIn = (a: string, b: string) => {
+    let n = 0; const d = new Date(`${a}T00:00:00`); const end = new Date(`${b}T00:00:00`);
+    while (d <= end) { if (!isOffDate(d, ctx.weekend) && !compulsoryHol.has(localIso(d))) n++; d.setDate(d.getDate() + 1); }
+    return n;
+  };
+  const dateOrderBad = !half && toDate < fromDate;
+  const allOff = !dateOrderBad && workingDaysIn(fromDate, effTo) === 0;
+  const overlaps = ctx.leaveRequests.some((lr) =>
+    (lr.status === 'Pending' || lr.status === 'Approved') && lr.fromDate && lr.toDate && lr.fromDate <= effTo && lr.toDate >= fromDate);
+  const dateError = dateOrderBad ? 'To date must be on or after the From date'
+    : allOff ? 'Those dates are holidays / weekly-offs — no leave needed'
+    : overlaps ? 'You already have a leave request on these dates'
+    : null;
+  const canSubmit = !!t && !exceedsBalance && !dateError;
 
   const addFiles = (items: AttFile[]) => setAttachments((a) => [...a, ...items].slice(0, 6));
   const removeFile = (i: number) => setAttachments((a) => a.filter((_, idx) => idx !== i));
 
   return (
     <Overlay title="Apply for leave" onClose={closeOverlay}
-      footer={<button disabled={!canSubmit} onClick={() => t && submitLeave({ type: t.name, from: displayDate(fromDate), to: displayDate(half ? fromDate : toDate), half, days, fromDate, toDate: half ? fromDate : toDate, reason, attachment: firstAttachment })} style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.55, cursor: canSubmit ? 'pointer' : 'not-allowed' }}>{exceedsBalance ? 'Exceeds balance' : 'Submit request'}</button>}>
+      footer={<button disabled={!canSubmit} onClick={() => t && submitLeave({ type: t.name, from: displayDate(fromDate), to: displayDate(half ? fromDate : toDate), half, days, fromDate, toDate: half ? fromDate : toDate, reason, attachment: firstAttachment })} style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.55, cursor: canSubmit ? 'pointer' : 'not-allowed' }}>{exceedsBalance ? 'Exceeds balance' : dateError ? 'Check the dates' : 'Submit request'}</button>}>
       <label style={fieldLabel}>Leave type</label>
       {leaveOptions.length === 0 ? (
         <Card pad={16} style={{ marginBottom: 20 }}>
@@ -285,6 +306,13 @@ export function ApplyLeaveScreen({ ctx }: { ctx: Ctx }) {
           <div style={{ position: 'absolute', top: 3, left: half ? 21 : 3, width: 22, height: 22, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left .2s' }} />
         </div>
       </div>
+
+      {dateError && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, padding: '11px 13px', borderRadius: 'var(--r-card)', background: 'var(--danger-soft)' }}>
+          <Icon name="x" size={15} color="var(--danger)" strokeWidth={2.6} />
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--danger)', lineHeight: 1.4 }}>{dateError}</span>
+        </div>
+      )}
 
       <label style={fieldLabel}>Reason</label>
       <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Add a short note for your manager…" rows={3} style={{

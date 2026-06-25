@@ -39,6 +39,8 @@ function mapLeave(r: LeaveRow): LeaveRequest {
     type: r.type,
     from: displayDay(r.from_date),
     to: displayDay(r.to_date),
+    fromDate: r.from_date ?? undefined,
+    toDate: r.to_date ?? undefined,
     half: r.half,
     days: Number(r.days),
     status,

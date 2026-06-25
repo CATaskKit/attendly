@@ -10,6 +10,8 @@ export type LeaveRequest = {
   type: string;
   from: string;
   to: string;
+  fromDate?: string;
+  toDate?: string;
   half: boolean;
   days: number;
   status: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
