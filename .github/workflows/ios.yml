@@ -1,0 +1,94 @@
+name: iOS build (cloud Mac)
+
+# Builds the iOS app on a macOS runner — no local Mac needed.
+# Default: an UNSIGNED .ipa (no Apple account required). Install it on an iPhone
+# with Sideloadly/AltStore + a free Apple ID (re-signs locally, 7-day testing).
+# For App Store / TestFlight, add the signing secrets and use the commented
+# "signed export" path at the bottom.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'capacitor.config.ts'
+      - '.github/workflows/ios.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
+        run: npm run build
+
+      - name: Sync Capacitor iOS
+        run: npx cap sync ios
+
+      - name: Install CocoaPods
+        working-directory: ios/App
+        run: pod install --repo-update
+
+      - name: Build app (unsigned)
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            build
+
+      - name: Package unsigned .ipa
+        working-directory: ios/App
+        run: |
+          APP="build/Build/Products/Release-iphoneos/App.app"
+          rm -rf Payload && mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry Attendly-unsigned.ipa Payload
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Attendly-iOS-unsigned
+          path: ios/App/Attendly-unsigned.ipa
+          if-no-files-found: error
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNED build → TestFlight / App Store (needs an Apple Developer account).
+# Once enrolled, add these repo secrets and replace the "Build app (unsigned)" +
+# "Package" steps with an archive + signed export:
+#   APPLE_CERTIFICATE_BASE64   – base64 of your distribution .p12
+#   APPLE_CERTIFICATE_PASSWORD – the .p12 password
+#   APPLE_PROVISIONING_PROFILE – base64 of the .mobileprovision
+#   APPLE_TEAM_ID              – your 10-char team id
+# Then:
+#   xcodebuild -workspace App.xcworkspace -scheme App -configuration Release \
+#     -archivePath build/App.xcarchive archive
+#   xcodebuild -exportArchive -archivePath build/App.xcarchive \
+#     -exportOptionsPlist ExportOptions.plist -exportPath build/ipa
+# and upload build/ipa/App.ipa to TestFlight (e.g. with `xcrun altool` /
+# `apple-actions/upload-testflight-build`). Also add GoogleService-Info.plist for
+# iOS push (APNs key in Firebase) — see the memory note.
