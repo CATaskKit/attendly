@@ -3,7 +3,7 @@ import { Icon, Card, Pill, SlideToConfirm } from './ui';
 import { locationMessage } from '../lib/attendanceAudit';
 import { isOffDate } from '../lib/calendar';
 import { isNative, openLocationSettings, savedMessage } from '../lib/native';
-import { MapView, VRow, SelfieTile } from './screens';
+import { MapView, VRow, SelfieTile, upcomingBirthdays } from './screens';
 import type { Ctx } from './data';
 import { APP_NAME } from '../lib/brand';
 import { signedReceiptUrl, type Holiday } from '../lib/api';
@@ -753,6 +753,32 @@ export function HolidaysScreen({ ctx }: { ctx: Ctx }) {
           {upcoming.length > 0 && (<>{heading(`Upcoming · ${upcoming.length}`)}<Card pad={4}>{upcoming.map((h, i) => <div key={h.id ?? i} style={{ borderTop: i ? '1px solid var(--hair)' : 'none' }}><HolidayRow h={h} /></div>)}</Card></>)}
           {past.length > 0 && (<>{heading(`Earlier this year · ${past.length}`, 18)}<Card pad={4}>{past.map((h, i) => <div key={h.id ?? i} style={{ borderTop: i ? '1px solid var(--hair)' : 'none' }}><HolidayRow h={h} dim /></div>)}</Card></>)}
         </>
+      )}
+      <div style={{ height: 16 }} />
+    </Overlay>
+  );
+}
+
+// ── BIRTHDAYS (this week) ────────────────────────────────────────────
+export function BirthdaysScreen({ ctx }: { ctx: Ctx }) {
+  const bdays = upcomingBirthdays(ctx.birthdays, ctx.now);
+  return (
+    <Overlay title="Birthdays this week" onClose={ctx.closeOverlay}>
+      {bdays.length === 0 ? (
+        <Card pad={16} style={{ color: 'var(--text-3)', fontSize: 13.5 }}>No birthdays in the coming week.</Card>
+      ) : (
+        <Card pad={4}>
+          {bdays.map((b, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '12px 10px', borderTop: i ? '1px solid var(--hair)' : 'none' }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 21, flexShrink: 0 }}>🎂</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>{b.name}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{b.label}</div>
+              </div>
+              <Pill tone={b.daysAway === 0 ? 'success' : 'accent'}>{b.daysAway === 0 ? 'Today 🎉' : b.daysAway === 1 ? 'Tomorrow' : `In ${b.daysAway}d`}</Pill>
+            </div>
+          ))}
+        </Card>
       )}
       <div style={{ height: 16 }} />
     </Overlay>

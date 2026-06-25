@@ -22,7 +22,7 @@ import { requestAppPermissions, isNative } from '../lib/native';
 import { initPush } from '../lib/push';
 import { HomeScreen, AttendanceScreen, ProfileScreen, BottomNav } from './screens';
 import { LeaveScreen, ApprovalsScreen } from './leave';
-import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen, AnnouncementsScreen, HolidaysScreen } from './overlays';
+import { CheckInScreen, CheckOutScreen, ApplyLeaveScreen, LogoutConfirm, NotificationsScreen, ReimbursementsScreen, AnnouncementsScreen, HolidaysScreen, BirthdaysScreen } from './overlays';
 import { INITIAL_LEAVE, INITIAL_TEAM, type Ctx, type LeaveRequest, type Status, type TeamRequest } from './data';
 
 const isoDate = (d: Date) => formatAppDate(d);
@@ -568,6 +568,7 @@ export default function EmployeeApp() {
         {overlay === 'reimbursements' && <ReimbursementsScreen ctx={ctx} />}
         {overlay === 'announcements' && <AnnouncementsScreen ctx={ctx} />}
         {overlay === 'holidays' && <HolidaysScreen ctx={ctx} />}
+        {overlay === 'birthdays' && <BirthdaysScreen ctx={ctx} />}
         {overlay === 'notifications' && <NotificationsScreen ctx={ctx} />}
         {overlay === 'logout' && <LogoutConfirm onCancel={ctx.closeOverlay} onConfirm={ctx.logout} />}
 

@@ -191,6 +191,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
   const upcoming = holidays.filter((h) => h.date >= todayIso).sort((a, b) => a.date.localeCompare(b.date))[0] || null;
   const upcomingDate = upcoming ? new Date(`${upcoming.date}T00:00:00`) : null;
   const bdays = upcomingBirthdays(ctx.birthdays, now);
+  const todayBdays = bdays.filter((b) => b.daysAway === 0);
   const daysAway = upcomingDate ? Math.max(0, Math.ceil((upcomingDate.getTime() - new Date(`${todayIso}T00:00:00`).getTime()) / 86400000)) : 0;
 
   return (
@@ -368,19 +369,19 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
       </div>
 
       <div style={{ marginTop: 22 }}>
-        <SectionTitle>Birthday week 🎂</SectionTitle>
-        {bdays.length === 0 ? (
-          <Card pad={14} style={{ color: 'var(--text-3)', fontSize: 13.5 }}>No birthdays this week.</Card>
+        <SectionTitle action={bdays.length > 0 ? 'See all' : undefined} onAction={() => openOverlay('birthdays')}>Birthday week 🎂</SectionTitle>
+        {todayBdays.length === 0 ? (
+          <Card pad={14} style={{ color: 'var(--text-3)', fontSize: 13.5 }}>{bdays.length ? `No birthdays today · ${bdays.length} coming this week` : 'No birthdays today.'}</Card>
         ) : (
           <Card pad={6}>
-            {bdays.map((b, i) => (
+            {todayBdays.map((b, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', borderTop: i ? '1px solid var(--hair)' : 'none' }}>
                 <div style={{ width: 40, height: 40, borderRadius: 11, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, flexShrink: 0 }}>🎂</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{b.label}</div>
                 </div>
-                <Pill tone={b.daysAway === 0 ? 'success' : 'accent'}>{b.daysAway === 0 ? 'Today 🎉' : b.daysAway === 1 ? 'Tomorrow' : `In ${b.daysAway}d`}</Pill>
+                <Pill tone="success">Today 🎉</Pill>
               </div>
             ))}
           </Card>
@@ -392,7 +393,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
 
 // Birthdays in the next `withinDays` days (incl. today), by month/day only —
 // the birth year is never used or shown. Sorted soonest first.
-function upcomingBirthdays(people: { name: string; dob: string }[], now: Date, withinDays = 7) {
+export function upcomingBirthdays(people: { name: string; dob: string }[], now: Date, withinDays = 7) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const out: { name: string; label: string; daysAway: number }[] = [];
   for (const p of people) {
