@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import {
   applyLeave, checkIn, checkOut, decideTeamLeave, decideLeave, listLeave, ensureMyEmployee, getTodayAttendance,
-  listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances, listEmployees, listTodayAttendance,
+  listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances, listEmployees, listTodayAttendance, listBirthdays,
   applyReimbursement, myReimbursements, listReimbursements, decideReimbursement, compOffEarned, getOrganizationSettings,
   cancelLeave as apiCancelLeave, cancelReimbursement as apiCancelReimbursement,
   listAnnouncements, listAnnouncementReads, markAnnouncementRead,
@@ -170,6 +170,7 @@ export default function EmployeeApp() {
   const [teamRows, setTeamRows] = useState<LeaveRow[]>([]);
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [teamReimb, setTeamReimb] = useState<Reimbursement[]>([]);
+  const [birthdays, setBirthdays] = useState<{ name: string; dob: string }[]>([]);
   const [teamMembers, setTeamMembers] = useState<Employee[]>([]);
   const [teamTodayAtt, setTeamTodayAtt] = useState<Record<string, AttendanceRow>>({});
   const [reimbState, setReimbState] = useState<{ enabled: boolean; requireManager: boolean }>({ enabled: false, requireManager: true });
@@ -276,6 +277,8 @@ export default function EmployeeApp() {
         ? [...balances, { type: 'Comp off', allotted: earnedComp, used: compUsed, pending: compPending, available: Math.max(0, earnedComp - compUsed - compPending) }]
         : balances);
       setHolidays(holidayRows);
+      // Org-wide birthdays for the home "Birthday week" (visible to everyone).
+      listBirthdays(orgId).then(setBirthdays).catch(() => setBirthdays([]));
       // A cancelled request is revoked — keep it out of the approvers' queue.
       const liveApprovals = approvals.filter((r) => r.status !== 'Cancelled');
       setTeamRows(liveApprovals);
@@ -351,6 +354,7 @@ export default function EmployeeApp() {
     setAttendanceRows([]);
     setLeaveBalances([]);
     setHolidays([]);
+    setBirthdays([]);
     setTeamRows([]);
     setLeaveRequests(INITIAL_LEAVE);
     setTeamRequests(INITIAL_TEAM);
@@ -387,7 +391,7 @@ export default function EmployeeApp() {
 
   const ctx: Ctx = {
     tab, setTab: changeTab, status, checkInTime, checkOutTime, elapsed, now, leaveRequests,
-    live, configured, homeLoading: live && !hasLoaded, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weekend, orgId, weeklyHours: weeklyHours(attendanceRows),
+    live, configured, homeLoading: live && !hasLoaded, employee, employeeName: empName, workspaceName: workspace.name, workspaceLogo: workspace.logo, attendanceRows, leaveBalances, holidays, weekend, orgId, birthdays, weeklyHours: weeklyHours(attendanceRows),
     attendanceAudit, refreshAttendanceAudit,
     timeSynced: clock.synced, timeSource: clock.source,
     fmtClock, fmtDur,

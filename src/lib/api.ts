@@ -647,6 +647,16 @@ export async function myLeaveBalances(orgId: string, employee: Employee | null, 
     });
 }
 
+// Org members' birthdays (name + DOB), for the home "Birthday week". Profiles
+// are org-readable via RLS. The DOB's year is never shown in the UI.
+export async function listBirthdays(orgId: string): Promise<{ name: string; dob: string }[]> {
+  const { data, error } = await db().from('profiles').select('full_name,date_of_birth').eq('org_id', orgId);
+  if (error) throw error;
+  return (data ?? [])
+    .filter((r) => r.date_of_birth)
+    .map((r) => ({ name: (r.full_name as string) || 'Teammate', dob: r.date_of_birth as string }));
+}
+
 // All of one day's attendance for the org (RLS-scoped). Used by approvers to
 // see who's present today.
 export async function listTodayAttendance(orgId: string, day: string): Promise<AttendanceRow[]> {

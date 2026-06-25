@@ -74,6 +74,7 @@ export type Ctx = {
   holidays: Holiday[];
   weekend: WeekendConfig;
   orgId: string | null;
+  birthdays: { name: string; dob: string }[];
   weeklyHours: number[];
   attendanceAudit: AttendanceAudit;
   refreshAttendanceAudit: () => Promise<AttendanceAudit>;

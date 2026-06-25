@@ -190,6 +190,7 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
   const todayIso = now.toISOString().slice(0, 10);
   const upcoming = holidays.filter((h) => h.date >= todayIso).sort((a, b) => a.date.localeCompare(b.date))[0] || null;
   const upcomingDate = upcoming ? new Date(`${upcoming.date}T00:00:00`) : null;
+  const bdays = upcomingBirthdays(ctx.birthdays, now);
   const daysAway = upcomingDate ? Math.max(0, Math.ceil((upcomingDate.getTime() - new Date(`${todayIso}T00:00:00`).getTime()) / 86400000)) : 0;
 
   return (
@@ -365,8 +366,46 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
           <Card pad={14} style={{ color: 'var(--text-3)', fontSize: 13.5 }}>No upcoming holidays yet.</Card>
         )}
       </div>
+
+      <div style={{ marginTop: 22 }}>
+        <SectionTitle>Birthday week 🎂</SectionTitle>
+        {bdays.length === 0 ? (
+          <Card pad={14} style={{ color: 'var(--text-3)', fontSize: 13.5 }}>No birthdays this week.</Card>
+        ) : (
+          <Card pad={6}>
+            {bdays.map((b, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', borderTop: i ? '1px solid var(--hair)' : 'none' }}>
+                <div style={{ width: 40, height: 40, borderRadius: 11, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, flexShrink: 0 }}>🎂</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{b.label}</div>
+                </div>
+                <Pill tone={b.daysAway === 0 ? 'success' : 'accent'}>{b.daysAway === 0 ? 'Today 🎉' : b.daysAway === 1 ? 'Tomorrow' : `In ${b.daysAway}d`}</Pill>
+              </div>
+            ))}
+          </Card>
+        )}
+      </div>
     </div>
   );
+}
+
+// Birthdays in the next `withinDays` days (incl. today), by month/day only —
+// the birth year is never used or shown. Sorted soonest first.
+function upcomingBirthdays(people: { name: string; dob: string }[], now: Date, withinDays = 7) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const out: { name: string; label: string; daysAway: number }[] = [];
+  for (const p of people) {
+    if (!p.dob) continue;
+    const d = new Date(`${p.dob}T00:00:00`);
+    if (isNaN(d.getTime())) continue;
+    let next = new Date(today.getFullYear(), d.getMonth(), d.getDate());
+    if (next < today) next = new Date(today.getFullYear() + 1, d.getMonth(), d.getDate());
+    const daysAway = Math.round((next.getTime() - today.getTime()) / 86400000);
+    if (daysAway < 0 || daysAway > withinDays) continue;
+    out.push({ name: p.name, label: next.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }), daysAway });
+  }
+  return out.sort((a, b) => a.daysAway - b.daysAway);
 }
 
 // ─────────────────────── MONTHLY CALENDAR ────────────────────────────
