@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import {
   applyLeave, checkIn, checkOut, decideTeamLeave, decideLeave, listLeave, ensureMyEmployee, getTodayAttendance,
-  listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances,
+  listHolidays, listMyAttendance, listMyTeamLeave, myLeave, myLeaveBalances, listEmployees, listTodayAttendance,
   applyReimbursement, myReimbursements, listReimbursements, decideReimbursement, compOffEarned, getOrganizationSettings,
   cancelLeave as apiCancelLeave, cancelReimbursement as apiCancelReimbursement,
   listAnnouncements, listAnnouncementReads, markAnnouncementRead,
@@ -168,6 +168,8 @@ export default function EmployeeApp() {
   const [teamRows, setTeamRows] = useState<LeaveRow[]>([]);
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [teamReimb, setTeamReimb] = useState<Reimbursement[]>([]);
+  const [teamMembers, setTeamMembers] = useState<Employee[]>([]);
+  const [teamTodayAtt, setTeamTodayAtt] = useState<Record<string, AttendanceRow>>({});
   const [reimbState, setReimbState] = useState<{ enabled: boolean; requireManager: boolean }>({ enabled: false, requireManager: true });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [readAnnIds, setReadAnnIds] = useState<Set<string>>(new Set());
@@ -278,7 +280,17 @@ export default function EmployeeApp() {
       // Approvers also load the org's pending claims to action (RLS-scoped to org).
       if (canApproveTeam) {
         listReimbursements().then((all) => setTeamReimb(all.filter((r) => r.status === 'Pending'))).catch(() => setTeamReimb([]));
-      } else setTeamReimb([]);
+        // Team roster + today's attendance, for the "Your team" view.
+        const myName = (emp?.name || profile.full_name || '').toLowerCase();
+        Promise.all([listEmployees().catch(() => [] as Employee[]), listTodayAttendance(orgId, currentDay).catch(() => [] as AttendanceRow[])])
+          .then(([emps, todayAtt]) => {
+            const roster = emps.filter((e) => e.status === 'Active' && (role !== 'manager' || (e.manager || '').toLowerCase() === myName));
+            setTeamMembers(roster);
+            const map: Record<string, AttendanceRow> = {};
+            for (const a of todayAtt) if (a.employee_id) map[a.employee_id] = a;
+            setTeamTodayAtt(map);
+          }).catch(() => { setTeamMembers([]); setTeamTodayAtt({}); });
+      } else { setTeamReimb([]); setTeamMembers([]); setTeamTodayAtt({}); }
       setReimbState({ enabled: billing ? reimbursementActive(billing) : false, requireManager: billing?.reimbursement_require_manager ?? true });
       setWorkspace({ name: billing?.display_name || billing?.name || '', logo: billing?.logo_url ?? null });
       setAnnouncements(annRows);
@@ -340,6 +352,8 @@ export default function EmployeeApp() {
     setTeamRequests(INITIAL_TEAM);
     setReimbursements([]);
     setTeamReimb([]);
+    setTeamMembers([]);
+    setTeamTodayAtt({});
     setReimbState({ enabled: false, requireManager: true });
     setAnnouncements([]);
     setReadAnnIds(new Set());
@@ -474,6 +488,8 @@ export default function EmployeeApp() {
     role,
     goAdmin: () => navigate('/admin'),
     notifications, unreadCount, markAllRead, markOneRead,
+    teamMembers,
+    teamTodayAtt,
     reimbursements,
     teamReimbursements: teamReimb,
     approveReimbursement: (id) => {

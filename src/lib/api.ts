@@ -647,6 +647,14 @@ export async function myLeaveBalances(orgId: string, employee: Employee | null, 
     });
 }
 
+// All of one day's attendance for the org (RLS-scoped). Used by approvers to
+// see who's present today.
+export async function listTodayAttendance(orgId: string, day: string): Promise<AttendanceRow[]> {
+  const { data, error } = await db().from('attendance').select('*').eq('org_id', orgId).eq('day', day);
+  if (error) throw error;
+  return (data ?? []) as AttendanceRow[];
+}
+
 // Attendance rows for one calendar month (month is 0-based), newest first.
 export async function listMyAttendanceMonth(orgId: string, employee: Employee | null, year: number, month: number): Promise<AttendanceRow[]> {
   if (!employee?.id) return [];

@@ -374,17 +374,13 @@ const calNav: CSSProperties = { width: 32, height: 32, borderRadius: 9, border: 
 
 // A real, navigable month grid that highlights the employee's attendance (with
 // check-in time), company holidays and weekly-offs. Tap a day for its detail.
-function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth }: { attendanceRows: AttendanceRow[]; holidays: Holiday[]; weekend: WeekendConfig; view: Date; onChangeMonth: (delta: number) => void }) {
+function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth, selected, onSelect }: { attendanceRows: AttendanceRow[]; holidays: Holiday[]; weekend: WeekendConfig; view: Date; onChangeMonth: (delta: number) => void; selected: string | null; onSelect: (iso: string) => void }) {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const isoOf = (dt: Date) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
   const todayIso = isoOf(now);
   const y = view.getFullYear(), m = view.getMonth();
   const dayIso = (d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
-  const inThisMonth = todayIso.startsWith(`${y}-${pad(m + 1)}`);
-  const [selected, setSelected] = useState<string | null>(inThisMonth ? todayIso : null);
-  // Clear the day selection whenever the parent switches month.
-  useEffect(() => { setSelected(inThisMonth ? todayIso : null); }, [y, m]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const attByDay = useMemo(() => { const map = new Map<string, AttendanceRow>(); for (const r of attendanceRows) map.set(r.day, r); return map; }, [attendanceRows]);
   const holByDay = useMemo(() => { const map = new Map<string, Holiday>(); for (const h of holidays) map.set(h.date, h); return map; }, [holidays]);
@@ -395,7 +391,6 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth 
   for (let i = 0; i < startPad; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
-  const t24 = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false });
   const t12 = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '—';
   const go = (delta: number) => onChangeMonth(delta);
 
@@ -467,15 +462,19 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth 
           else if (off) { bg = 'var(--muted-soft)'; color = 'var(--text-3)'; }
           else if (iso < todayIso) color = 'var(--danger)';
           const isSel = iso === selected, isToday = iso === todayIso;
+          const workedH = att?.work_seconds ? att.work_seconds / 3600 : 0;
           return (
-            <button key={i} onClick={() => setSelected(iso)} title={hol?.name} style={{
-              aspectRatio: '1', borderRadius: 10, padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
-              background: bg, color, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative',
-              border: isSel ? '1.5px solid var(--accent)' : isToday ? '1.5px solid var(--text-3)' : '1.5px solid transparent',
+            <button key={i} onClick={() => onSelect(iso)} title={hol?.name} style={{
+              aspectRatio: '1', borderRadius: 12, padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 700, gap: 1,
+              background: isSel ? 'var(--accent)' : bg, color: isSel ? '#fff' : color,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative',
+              border: isToday && !isSel ? '1.5px solid var(--accent)' : '1.5px solid transparent',
+              boxShadow: isSel ? '0 5px 14px var(--accent-glow)' : 'none',
             }}>
-              {d}
-              {present && att?.check_in_at && <span style={{ fontSize: 8, fontWeight: 600, opacity: 0.9, lineHeight: 1, marginTop: 1 }}>{t24(att.check_in_at)}</span>}
-              {hol && !present && <span style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: '50%', background: 'var(--accent)' }} />}
+              <span style={{ lineHeight: 1 }}>{d}</span>
+              {workedH > 0 && <span style={{ fontSize: 8.5, fontWeight: 800, lineHeight: 1, color: isSel ? 'rgba(255,255,255,0.92)' : 'var(--success)' }}>{workedH.toFixed(1)}h</span>}
+              {present && !workedH && <span style={{ width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--success)' }} />}
+              {hol && !present && <span style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--accent)' }} />}
             </button>
           );
         })}
@@ -497,9 +496,21 @@ function MonthCalendar({ attendanceRows, holidays, weekend, view, onChangeMonth 
 // ─────────────────────── ATTENDANCE TAB ──────────────────────────────
 export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
   const now = ctx.now;
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const isoOf = (dt: Date) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+  const todayIso = isoOf(now);
   const [view, setView] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
   const isCurrentMonth = view.getFullYear() === now.getFullYear() && view.getMonth() === now.getMonth();
   const monthLabel = view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  // Selected calendar day drives the "last 7 days" log. Defaults to today.
+  const [selectedDay, setSelectedDay] = useState<string>(todayIso);
+  const changeMonth = (delta: number) => {
+    const next = new Date(view.getFullYear(), view.getMonth() + delta, 1);
+    setView(next);
+    const cur = next.getFullYear() === now.getFullYear() && next.getMonth() === now.getMonth();
+    // Land on today for the current month, else the last day of that month.
+    setSelectedDay(cur ? todayIso : isoOf(new Date(next.getFullYear(), next.getMonth() + 1, 0)));
+  };
 
   // The current month tracks the live ctx rows; other months are fetched on demand.
   const [monthRows, setMonthRows] = useState<AttendanceRow[]>(ctx.attendanceRows);
@@ -546,9 +557,19 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
     { label: 'Absent', value: count('Absent'), tone: 'danger' },
     { label: 'Late', value: count('Late'), tone: 'warning' },
   ];
-  // The list shows just the most recent week of the selected month; Export
-  // covers the whole month.
-  const weekLog = log.slice(0, 7);
+  // Daily log = the 7 most recent attendance days on or before the selected
+  // calendar day. Export still covers the whole month.
+  const weekLog = ctx.configured
+    ? monthRows.filter((r) => r.day <= selectedDay).slice(0, 7).map((r) => {
+        const d = new Date(`${r.day}T00:00:00`);
+        return {
+          d: d.toLocaleDateString('en-US', { weekday: 'short' }),
+          date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          in: fmtTime(r.check_in_at), out: fmtTime(r.check_out_at), h: fmtHours(r.work_seconds), status: r.status,
+        };
+      })
+    : demoLog;
+  const selLabel = new Date(`${selectedDay}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const exportMine = async () => {
     const rows = monthRows.map((r) => ({
       Date: r.day,
@@ -597,13 +618,13 @@ export function AttendanceScreen({ ctx }: { ctx: Ctx }) {
 
       <div style={{ marginTop: 22 }}>
         <SectionTitle>Calendar</SectionTitle>
-        <MonthCalendar attendanceRows={monthRows} holidays={ctx.holidays} weekend={ctx.weekend} view={view} onChangeMonth={(d) => setView(new Date(view.getFullYear(), view.getMonth() + d, 1))} />
+        <MonthCalendar attendanceRows={monthRows} holidays={ctx.holidays} weekend={ctx.weekend} view={view} onChangeMonth={changeMonth} selected={selectedDay} onSelect={setSelectedDay} />
       </div>
 
       <div style={{ marginTop: 22 }}>
-        <SectionTitle action={ctx.live && monthRows.length > 0 ? `Export ${monthLabel.split(' ')[0]}` : undefined} onAction={() => void exportMine()}>Daily log · last 7 days</SectionTitle>
+        <SectionTitle action={ctx.live && monthRows.length > 0 ? `Export ${monthLabel.split(' ')[0]}` : undefined} onAction={() => void exportMine()}>Daily log · 7 days to {selLabel}</SectionTitle>
         <Card pad={0} style={{ overflow: 'hidden' }}>
-          {weekLog.length === 0 && <div style={{ padding: 18, color: 'var(--text-3)', fontSize: 13.5 }}>No attendance records for {monthLabel}.</div>}
+          {weekLog.length === 0 && <div style={{ padding: 18, color: 'var(--text-3)', fontSize: 13.5 }}>No attendance records up to {selLabel}.</div>}
           {weekLog.map((e, i) => (
             <div key={`${e.date}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 15px', borderBottom: i < weekLog.length - 1 ? '1px solid var(--hair)' : 'none' }}>
               <div style={{ width: 40, textAlign: 'center', flexShrink: 0 }}>

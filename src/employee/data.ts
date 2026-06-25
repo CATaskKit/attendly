@@ -96,6 +96,8 @@ export type Ctx = {
   unreadCount: number;
   markAllRead: () => void;
   markOneRead: (id: string) => void;
+  teamMembers: Employee[];
+  teamTodayAtt: Record<string, AttendanceRow>;
   reimbursements: Reimbursement[];
   teamReimbursements: Reimbursement[];
   approveReimbursement: (id: string) => void;

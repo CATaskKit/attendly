@@ -128,12 +128,15 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
   const isHR = ctx.role === 'owner' || ctx.role === 'hr';
   // HR/owner can action any pending claim (single pass); a manager only its stage.
   const reimbQueue = ctx.teamReimbursements.filter((r) => r.status === 'Pending' && (isHR || r.stage === 'manager'));
-  const [filter, setFilter] = useState<'Pending' | 'All'>('Pending');
+  const [filter, setFilter] = useState<'Pending' | 'All' | 'On leave'>('Pending');
+  const [showRoster, setShowRoster] = useState(false);
   const pending = teamRequests.filter((r) => r.status === 'Pending');
   const actioned = teamRequests.filter((r) => r.status !== 'Pending').length;
-  const onLeave = teamRequests.filter((r) => r.status === 'Approved' && r.active).length;
-  const shown = filter === 'Pending' ? pending : teamRequests;
-  const teamCount = new Set(teamRequests.map((r) => r.code).filter((code) => code && code !== '-')).size;
+  const onLeaveList = teamRequests.filter((r) => r.status === 'Approved' && r.active);
+  const onLeave = onLeaveList.length;
+  const shown = filter === 'Pending' ? pending : filter === 'On leave' ? onLeaveList : teamRequests;
+  const onLeaveCodes = new Set(onLeaveList.map((r) => r.code).filter(Boolean));
+  const presentToday = ctx.teamMembers.filter((m) => ctx.teamTodayAtt[m.id]?.check_in_at).length;
 
   return (
     <div>
@@ -155,15 +158,46 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
       )}
 
       {view === 'leave' && (<>
-      <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <Avatar name={ctx.employeeName} size={42} accent="var(--accent)" />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>{ctx.role === 'manager' ? 'Your team' : 'Organization'}</div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{teamCount ? `${teamCount} ${ctx.role === 'manager' ? 'direct report' : 'employee'}${teamCount === 1 ? '' : 's'} with requests` : (ctx.role === 'manager' ? 'Direct reports' : 'All employees')}</div>
-        </div>
-        <Pill tone="accent"><Icon name="users" size={13} color="var(--accent)" />{teamCount}</Pill>
-      </Card>
+      <div onClick={() => setShowRoster((s) => !s)} style={{ cursor: 'pointer' }}>
+        <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <Avatar name={ctx.employeeName} size={42} accent="var(--accent)" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>{ctx.role === 'manager' ? 'Your team' : 'Organization'}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{ctx.teamMembers.length} {ctx.role === 'manager' ? 'report' : 'employee'}{ctx.teamMembers.length === 1 ? '' : 's'} · {presentToday} present today · tap to view</div>
+          </div>
+          <Icon name="chevronRight" size={20} color="var(--text-3)" style={{ transform: showRoster ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+        </Card>
+      </div>
 
+      {showRoster && (
+        ctx.teamMembers.length === 0 ? (
+          <Card pad={20} style={{ color: 'var(--text-3)', fontSize: 13.5, textAlign: 'center' }}>No active team members.</Card>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {ctx.teamMembers.map((m) => {
+              const onLv = onLeaveCodes.has(m.code);
+              const att = ctx.teamTodayAtt[m.id];
+              const inT = att?.check_in_at ? new Date(att.check_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : null;
+              const outT = att?.check_out_at ? new Date(att.check_out_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : null;
+              const tone = onLv ? 'accent' : inT ? 'success' : 'danger';
+              const label = onLv ? 'On leave' : inT ? 'Present' : 'Absent';
+              const sub = onLv ? 'On approved leave today' : inT ? `${inT}${outT ? ` → ${outT}` : ' · working'}` : 'Not checked in';
+              return (
+                <Card key={m.id} pad={12} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <Avatar name={m.name} size={40} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{m.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{m.dept || '—'} · {sub}</div>
+                  </div>
+                  <Pill tone={tone as 'accent'}>{label}</Pill>
+                </Card>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {!showRoster && (<>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 18 }}>
         {[
           { v: pending.length, l: 'Pending', tone: 'warning' },
@@ -178,14 +212,15 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
       </div>
 
       <div style={{ display: 'inline-flex', background: 'var(--muted-soft)', borderRadius: 999, padding: 3, marginBottom: 14 }}>
-        {(['Pending', 'All'] as const).map((f) => {
+        {(['Pending', 'All', 'On leave'] as const).map((f) => {
           const on = filter === f;
+          const n = f === 'Pending' ? pending.length : f === 'On leave' ? onLeave : 0;
           return (
             <button key={f} onClick={() => setFilter(f)} style={{
               border: 'none', cursor: 'pointer', background: on ? 'var(--card)' : 'transparent',
-              color: on ? 'var(--text-1)' : 'var(--text-3)', fontWeight: 700, fontSize: 13, padding: '7px 18px',
-              borderRadius: 999, boxShadow: on ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            }}>{f}{f === 'Pending' && pending.length > 0 ? ` · ${pending.length}` : ''}</button>
+              color: on ? 'var(--text-1)' : 'var(--text-3)', fontWeight: 700, fontSize: 13, padding: '7px 14px',
+              borderRadius: 999, boxShadow: on ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', whiteSpace: 'nowrap',
+            }}>{f}{n > 0 ? ` · ${n}` : ''}</button>
           );
         })}
       </div>
@@ -195,14 +230,15 @@ export function ApprovalsScreen({ ctx }: { ctx: Ctx }) {
           <div style={{ width: 54, height: 54, borderRadius: '50%', background: 'var(--success-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="checkCircle" size={28} color="var(--success)" strokeWidth={2} />
           </div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>No pending requests</div>
-          <div style={{ fontSize: 13, color: 'var(--text-3)' }}>New leave requests {ctx.role === 'manager' ? 'from your team' : 'across your organization'} will appear here.</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>{filter === 'On leave' ? 'Nobody on leave today' : filter === 'All' ? 'No requests yet' : 'No pending requests'}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-3)' }}>{filter === 'On leave' ? `No ${ctx.role === 'manager' ? 'team member' : 'employee'} is on approved leave today.` : `New leave requests ${ctx.role === 'manager' ? 'from your team' : 'across your organization'} will appear here.`}</div>
         </Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {shown.map((r) => <ApprovalCard key={r.id} r={r} onApprove={() => approveTeam(r.id)} onReject={() => rejectTeam(r.id)} />)}
         </div>
       )}
+      </>)}
       </>)}
 
       {view === 'reimb' && (
