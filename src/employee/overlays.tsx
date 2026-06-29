@@ -516,7 +516,7 @@ export function NotificationsScreen({ ctx }: { ctx: Ctx }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {notifications.map((n) => (
-            <Card key={n.id} pad={14} onClick={() => markOneRead(n.id)} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', background: n.read ? 'var(--card)' : 'var(--accent-soft)' }}>
+            <Card key={n.id} pad={14} onClick={() => { markOneRead(n.id); ctx.goNotification(n.type); }} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer', background: n.read ? 'var(--card)' : 'var(--accent-soft)' }}>
               <div style={{ width: 38, height: 38, borderRadius: 11, flexShrink: 0, background: 'var(--card)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name={iconFor(n.type)} size={19} color="var(--accent)" />
               </div>

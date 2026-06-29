@@ -3,8 +3,9 @@ import { saveDeviceToken } from './api';
 
 // Register the device for FCM push notifications and store its token so the
 // send-push Edge Function can deliver to it. No-op on web / when permission is
-// denied. Safe to call once the user is signed in.
-export async function initPush(): Promise<void> {
+// denied. Safe to call once the user is signed in. `onOpen` is called with the
+// notification's data payload when the user taps a push, so the app can deep-link.
+export async function initPush(onOpen?: (data: Record<string, unknown>) => void): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   try {
     const { PushNotifications } = await import('@capacitor/push-notifications');
@@ -34,6 +35,10 @@ export async function initPush(): Promise<void> {
     });
     await PushNotifications.addListener('registrationError', (err) => {
       console.warn('Push registration error', err);
+    });
+    // Tapping the OS notification opens the app to its related screen.
+    await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+      try { onOpen?.((action.notification?.data ?? {}) as Record<string, unknown>); } catch { /* ignore */ }
     });
 
     await PushNotifications.register();

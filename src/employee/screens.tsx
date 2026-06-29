@@ -214,7 +214,9 @@ export function HomeScreen({ ctx }: { ctx: Ctx }) {
             <Icon name="bell" size={20} color="var(--text-2)" />
             {ctx.unreadCount > 0 && <span style={{ position: 'absolute', top: 5, right: 6, minWidth: 16, height: 16, padding: '0 3px', borderRadius: 999, background: 'var(--danger)', color: '#fff', fontSize: 9.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--card)' }}>{ctx.unreadCount}</span>}
           </button>
-          <Avatar name={employeeName} size={42} accent="var(--accent)" />
+          <button onClick={() => ctx.setTab('profile')} aria-label="Open profile" style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', borderRadius: '50%', lineHeight: 0 }}>
+            <Avatar name={employeeName} size={42} accent="var(--accent)" />
+          </button>
         </div>
       </div>
 

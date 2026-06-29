@@ -313,9 +313,21 @@ export default function EmployeeApp() {
     }
   }, [applyTodayState, canApproveTeam, role, currentDay, live, orgId, profile]);
 
+  // Open the screen a notification refers to (from the in-app bell or a tapped
+  // OS push). setTab/setOverlay are stable, so this stays stable for initPush.
+  const goNotification = useCallback((type: string) => {
+    const t = type || '';
+    if (t === 'leave_request' || t === 'reimbursement') { setOverlay(null); setTab('approvals'); }
+    else if (t.startsWith('leave_')) { setOverlay(null); setTab('leave'); }
+    else if (t.startsWith('reimbursement_')) { setTab('home'); setOverlay('reimbursements'); }
+    else { setOverlay(null); setTab('home'); }
+  }, []);
+  const onPushOpen = useCallback((data: Record<string, unknown>) => { goNotification(String(data?.type ?? '')); }, [goNotification]);
+
   // Ask for camera + photo access once on native, so capturing/attaching
   // receipts and saving exports works without a mid-action permission stall.
-  useEffect(() => { void requestAppPermissions(); void initPush(); }, []);
+  // initPush(onPushOpen) also routes a tapped push to its related screen.
+  useEffect(() => { void requestAppPermissions(); void initPush(onPushOpen); }, [onPushOpen]);
 
   // Re-register the FCM token whenever the app comes to the foreground. After a
   // reinstall or permission-granted-later, the token rotates; this keeps the
@@ -323,9 +335,9 @@ export default function EmployeeApp() {
   useEffect(() => {
     if (!isNative()) return;
     let handle: { remove: () => void } | undefined;
-    void import('@capacitor/app').then(({ App }) => App.addListener('resume', () => { void initPush(); }).then((h) => { handle = h; }));
+    void import('@capacitor/app').then(({ App }) => App.addListener('resume', () => { void initPush(onPushOpen); }).then((h) => { handle = h; }));
     return () => { handle?.remove(); };
-  }, []);
+  }, [onPushOpen]);
 
   useEffect(() => { void reloadLive(); }, [reloadLive]);
   // Live updates: refresh when leave/attendance change for this tenant.
@@ -497,7 +509,7 @@ export default function EmployeeApp() {
     logout: () => { void signOut().then(() => navigate('/')); },
     role,
     goAdmin: () => navigate('/admin'),
-    notifications, unreadCount, markAllRead, markOneRead,
+    notifications, unreadCount, markAllRead, markOneRead, goNotification,
     teamMembers,
     teamTodayAtt,
     reimbursements,
