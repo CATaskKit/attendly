@@ -176,7 +176,7 @@ export default function EmployeeApp() {
   const [reimbState, setReimbState] = useState<{ enabled: boolean; requireManager: boolean }>({ enabled: false, requireManager: true });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [readAnnIds, setReadAnnIds] = useState<Set<string>>(new Set());
-  const [geo, setGeo] = useState<{ enabled: boolean; lat: number | null; lng: number | null; radius: number }>({ enabled: false, lat: null, lng: null, radius: 150 });
+  const [geo, setGeo] = useState<{ enabled: boolean; offices: { name: string; lat: number; lng: number }[]; radius: number }>({ enabled: false, offices: [], radius: 150 });
   const [weekend, setWeekend] = useState<WeekendConfig>(DEFAULT_WEEKEND);
   const [workspace, setWorkspace] = useState<{ name: string; logo: string | null }>({ name: '', logo: null });
   const [attendanceAudit, setAttendanceAudit] = useState<AttendanceAudit>(() => ({ location: null, ip: null, device: getDeviceInfo() }));
@@ -263,8 +263,10 @@ export default function EmployeeApp() {
         listAnnouncementReads().catch(() => []),
         getOrganizationSettings(orgId).catch(() => ({} as Record<string, unknown>)),
       ]);
-      const ap = ((orgSettings as Record<string, unknown>).attendancePolicy ?? {}) as { geofence?: number; geo?: boolean; officeLat?: number; officeLng?: number };
-      setGeo({ enabled: !!ap.geo && ap.officeLat != null && ap.officeLng != null, lat: ap.officeLat ?? null, lng: ap.officeLng ?? null, radius: Number(ap.geofence) || 150 });
+      const ap = ((orgSettings as Record<string, unknown>).attendancePolicy ?? {}) as { geofence?: number; geo?: boolean; officeLat?: number; officeLng?: number; offices?: { name: string; lat: number; lng: number }[] };
+      const offices = Array.isArray(ap.offices) && ap.offices.length ? ap.offices
+        : (ap.officeLat != null && ap.officeLng != null ? [{ name: 'Office', lat: ap.officeLat, lng: ap.officeLng }] : []);
+      setGeo({ enabled: !!ap.geo && offices.length > 0, offices, radius: Number(ap.geofence) || 150 });
       setWeekend(weekendConfigFrom(billing));
       setLeaveRequests(leaveRows.map(mapLeave));
       setAttendanceRows(attRows);
@@ -365,7 +367,7 @@ export default function EmployeeApp() {
     setReimbState({ enabled: false, requireManager: true });
     setAnnouncements([]);
     setReadAnnIds(new Set());
-    setGeo({ enabled: false, lat: null, lng: null, radius: 150 });
+    setGeo({ enabled: false, offices: [], radius: 150 });
     setWorkspace({ name: '', logo: null });
   }, [configured]);
 
@@ -400,11 +402,11 @@ export default function EmployeeApp() {
     doCheckIn: (audit = attendanceAudit) => {
       // Location is compulsory for an entry — block and prompt if it's missing.
       if (!audit.location) { showToast(locationMessage(audit.locationError ?? null), 'x'); return; }
-      // Geofence: block check-ins outside the office radius when the org enforces it.
-      if (geo.enabled && geo.lat != null && geo.lng != null) {
-        if (audit.lat == null || audit.lng == null) { showToast('Turn on precise location to check in at this office.', 'x'); return; }
-        const dist = distanceMeters(audit.lat, audit.lng, geo.lat, geo.lng);
-        if (dist > geo.radius) { showToast(`You're ${Math.round(dist)} m from the office (limit ${geo.radius} m). Move closer to check in.`, 'x'); return; }
+      // Geofence: allow the check-in if within the radius of ANY office.
+      if (geo.enabled && geo.offices.length) {
+        if (audit.lat == null || audit.lng == null) { showToast('Turn on precise location to check in at the office.', 'x'); return; }
+        const nearest = Math.min(...geo.offices.map((o) => distanceMeters(audit.lat as number, audit.lng as number, o.lat, o.lng)));
+        if (nearest > geo.radius) { showToast(`You're ${Math.round(nearest)} m from the nearest office (limit ${geo.radius} m). Move closer to check in.`, 'x'); return; }
       }
       void getPunchTime().then((localTime) => {
         if (!localTime) { showToast('You are not connected to the internet', 'x'); return; }

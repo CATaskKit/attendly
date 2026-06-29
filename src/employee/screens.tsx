@@ -506,7 +506,8 @@ function MonthCalendar({ attendanceRows, holidays, weekend, leaveDays, view, onC
           else if (off) { bg = 'var(--muted-soft)'; color = 'var(--text-3)'; }
           else if (iso < todayIso) color = 'var(--danger)';
           const isSel = iso === selected, isToday = iso === todayIso;
-          const workedH = att?.work_seconds ? att.work_seconds / 3600 : 0;
+          const workedSec = att?.work_seconds || 0;
+          const workedLabel = workedSec > 0 ? `${Math.floor(workedSec / 3600)}:${pad(Math.floor((workedSec % 3600) / 60))}` : '';
           return (
             <button key={i} onClick={() => onSelect(iso)} title={hol?.name} style={{
               aspectRatio: '1', borderRadius: 12, padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 700, gap: 1,
@@ -516,8 +517,8 @@ function MonthCalendar({ attendanceRows, holidays, weekend, leaveDays, view, onC
               boxShadow: isSel ? '0 5px 14px var(--accent-glow)' : 'none',
             }}>
               <span style={{ lineHeight: 1 }}>{d}</span>
-              {workedH > 0 && <span style={{ fontSize: 8.5, fontWeight: 800, lineHeight: 1, color: isSel ? 'rgba(255,255,255,0.92)' : 'var(--success)' }}>{workedH.toFixed(1)}h</span>}
-              {present && !workedH && <span style={{ width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--success)' }} />}
+              {workedSec > 0 && <span style={{ fontSize: 8.5, fontWeight: 800, lineHeight: 1, color: isSel ? 'rgba(255,255,255,0.92)' : 'var(--success)' }}>{workedLabel}</span>}
+              {present && !workedSec && <span style={{ width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--success)' }} />}
               {leave && !present && <span style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--warning)', opacity: leave === 'Pending' ? 0.55 : 1 }} />}
               {hol && !present && !leave && <span style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: '50%', background: isSel ? '#fff' : 'var(--accent)' }} />}
             </button>

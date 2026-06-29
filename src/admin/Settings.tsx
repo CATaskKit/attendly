@@ -345,32 +345,51 @@ function RolesSettings({ orgId, canManage, notify }: SectionProps) {
 }
 
 // ── 3. Attendance policy (local) ─────────────────────────────────────
-type AttPolicy = { geofence: number; ot: number; half: number; selfie: boolean; web: boolean; otOn: boolean; geo: boolean; officeLat: number | null; officeLng: number | null; autoCheckout?: 'off' | 'hours' | 'time'; autoHours?: number; autoTime?: string };
+type Office = { name: string; lat: number; lng: number };
+type AttPolicy = { geofence: number; ot: number; half: number; selfie: boolean; web: boolean; otOn: boolean; geo: boolean; officeLat: number | null; officeLng: number | null; offices?: Office[]; autoCheckout?: 'off' | 'hours' | 'time'; autoHours?: number; autoTime?: string };
 const AUTO_LABEL: Record<'off' | 'hours' | 'time', string> = { off: 'Off', hours: 'Hours after check-in', time: 'At a fixed time' };
 const AUTO_MODE: Record<string, 'off' | 'hours' | 'time'> = { 'Off': 'off', 'Hours after check-in': 'hours', 'At a fixed time': 'time' };
 function AttendanceSettings({ orgId, canManage, notify }: SectionProps) {
-  const [c, setC] = useOrgSetting<AttPolicy>(orgId, 'attendancePolicy', { geofence: 150, ot: 8, half: 4, selfie: true, web: false, otOn: true, geo: false, officeLat: null, officeLng: null, autoCheckout: 'off', autoHours: 8, autoTime: '20:00' });
+  const [c, setC] = useOrgSetting<AttPolicy>(orgId, 'attendancePolicy', { geofence: 150, ot: 8, half: 4, selfie: true, web: false, otOn: true, geo: false, officeLat: null, officeLng: null, offices: [], autoCheckout: 'off', autoHours: 8, autoTime: '20:00' });
   const u = (k: keyof AttPolicy, v: number | boolean | string) => setC({ ...c, [k]: v });
   const [locating, setLocating] = useState(false);
-  const captureOffice = async () => {
+  // Effective office list — migrates a legacy single office into the array.
+  const offices: Office[] = c.offices && c.offices.length ? c.offices
+    : (c.officeLat != null && c.officeLng != null ? [{ name: 'Office 1', lat: c.officeLat, lng: c.officeLng }] : []);
+  const addOffice = async () => {
     setLocating(true);
     try {
       const loc = await getLocation();
       if (loc.lat == null || loc.lng == null) { notify('Could not get location — turn it on and retry', 'red', 'xCircle'); return; }
-      setC({ ...c, officeLat: Math.round(loc.lat * 1e6) / 1e6, officeLng: Math.round(loc.lng * 1e6) / 1e6 });
-      notify('Office location set from this device');
+      const next = [...offices, { name: `Office ${offices.length + 1}`, lat: Math.round(loc.lat * 1e6) / 1e6, lng: Math.round(loc.lng * 1e6) / 1e6 }];
+      setC({ ...c, offices: next });
+      notify('Office location added from this device');
     } catch { notify('Could not get location', 'red', 'xCircle'); }
     finally { setLocating(false); }
   };
+  const renameOffice = (i: number, name: string) => setC({ ...c, offices: offices.map((o, idx) => idx === i ? { ...o, name } : o) });
+  const removeOffice = (i: number) => setC({ ...c, offices: offices.filter((_, idx) => idx !== i) });
   return (
     <SCard title="Attendance policy" desc="Rules applied when employees check in and out. Shift timing & late grace are set in Work week." action={canManage ? <BtnPrimary icon="check" onClick={() => notify('Attendance policy saved')}>Save</BtnPrimary> : undefined}>
       <SettingItem label="Restrict check-in to office" desc="Block check-ins beyond the geofence radius of the office location. Employees must share GPS to check in.">
         <SToggle on={c.geo} onChange={(v) => u('geo', v)} disabled={!canManage} />
       </SettingItem>
-      <SettingItem label="Office location" desc={c.officeLat != null ? `Set to ${c.officeLat}, ${c.officeLng}. Capture again from a device at the office to update.` : 'Not set. Open this from a device at the office and capture its location.'}>
-        <BtnGhost icon="shield" onClick={() => void captureOffice()} disabled={!canManage || locating}>{locating ? 'Locating…' : 'Use current location'}</BtnGhost>
+      <SettingItem label="Office locations" desc="Add one or more offices — a check-in is valid within the radius of ANY of them. Open this page from a device at each office and add its location.">
+        <BtnGhost icon="shield" onClick={() => void addOffice()} disabled={!canManage || locating}>{locating ? 'Locating…' : 'Add current location'}</BtnGhost>
       </SettingItem>
-      <SettingItem label="Geofence radius" desc="Allowed distance from the office location for a valid check-in."><SNumber value={c.geofence} onChange={(v) => u('geofence', v)} min={50} max={1000} step={50} unit="m" /></SettingItem>
+      {offices.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '0 0 18px' }}>
+          {offices.map((o, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, background: 'var(--bg)', border: '1px solid var(--line)' }}>
+              <AIcon name="shield" size={15} color="var(--accent)" />
+              <input value={o.name} disabled={!canManage} onChange={(e) => renameOffice(i, e.target.value)} placeholder={`Office ${i + 1}`} style={{ flex: 1, minWidth: 0, border: 'none', background: 'transparent', fontSize: 13.5, fontWeight: 600, color: 'var(--ink-1)', outline: 'none', fontFamily: 'inherit' }} />
+              <span style={{ fontSize: 11.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{o.lat}, {o.lng}</span>
+              {canManage && <button onClick={() => removeOffice(i)} title="Remove" style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, display: 'flex', flexShrink: 0 }}><AIcon name="trash" size={14} color="var(--ink-3)" /></button>}
+            </div>
+          ))}
+        </div>
+      )}
+      <SettingItem label="Geofence radius" desc="Allowed distance from any office for a valid check-in."><SNumber value={c.geofence} onChange={(v) => u('geofence', v)} min={50} max={1000} step={50} unit="m" /></SettingItem>
       <SettingItem label="Require GPS location" desc="Compulsory — check-in is blocked until the employee shares a location."><SToggle on={true} onChange={() => {}} disabled /></SettingItem>
       <SettingItem label="Require check-in selfie" desc="Capture a verification selfie on every check-in."><SToggle on={c.selfie} onChange={(v) => u('selfie', v)} /></SettingItem>
       <SettingItem label="Allow web check-in" desc="Permit attendance from the web app, not just mobile."><SToggle on={c.web} onChange={(v) => u('web', v)} /></SettingItem>
