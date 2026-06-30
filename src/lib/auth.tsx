@@ -38,6 +38,8 @@ type AuthContextValue = {
   createOrganization: (name: string) => Promise<{ error?: string }>;
   /** sign up an invited employee and link them to the inviting org by email */
   joinOrg: (fullName: string, email: string, password: string) => Promise<{ error?: string; joined?: boolean }>;
+  /** re-attempt to attach a signed-in account to an org (claim a pending invite) and reload the profile */
+  refreshMembership: () => Promise<{ orgId: string | null }>;
   signOut: () => Promise<void>;
   /** demo-mode only: pretend to sign in so the UI is explorable without keys */
   demoSignIn: () => void;
@@ -159,6 +161,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { joined: !!(prof as Profile | null)?.org_id };
   };
 
+  const refreshMembership: AuthContextValue['refreshMembership'] = async () => {
+    if (!supabase) return { orgId: profile?.org_id ?? null };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { orgId: null };
+    // Best-effort: claim a matching employee invite added after they signed up.
+    try { await supabase.rpc('claim_invite'); } catch { /* claim_invite not available yet — ignore */ }
+    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    const prof = (data as Profile) ?? null;
+    setProfile(prof);
+    return { orgId: prof?.org_id ?? null };
+  };
+
   const sendPasswordReset: AuthContextValue['sendPasswordReset'] = async (email) => {
     if (!supabase) return { error: 'Connect Supabase to send password reset emails.' };
     const resetUrl = `${SITE_URL}/?reset-password=1`;
@@ -234,6 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     updateProfile,
     createOrganization,
     joinOrg,
+    refreshMembership,
     signOut,
     demoSignIn,
     recovery,

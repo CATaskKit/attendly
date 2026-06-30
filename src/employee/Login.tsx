@@ -12,8 +12,12 @@ import { APP_NAME, VENDOR, APP_VERSION } from '../lib/brand';
 // employee app. On the web, owners/HR run the admin console; an owner who
 // hasn't created their org yet goes to onboarding.
 function landingFor(role?: Role, orgId?: string | null): string {
+  // An owner who hasn't created their org yet goes to onboarding (web-only).
+  if (role === 'owner' && !orgId && !Capacitor.isNativePlatform()) return '/onboarding';
+  // Any other signed-in account with no org can't use the app — park them on the
+  // "no workspace" screen instead of dropping them into an empty app shell.
+  if (!orgId) return '/no-workspace';
   if (Capacitor.isNativePlatform()) return '/app';
-  if (role === 'owner' && !orgId) return '/onboarding';
   if (role === 'owner' || role === 'hr') return '/admin';
   return '/app';
 }

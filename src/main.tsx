@@ -7,6 +7,7 @@ import { AuthProvider, useAuth, type Role } from './lib/auth';
 import { ErrorBoundary } from './lib/ErrorBoundary';
 import Login from './employee/Login';
 import EmployeeApp from './employee/EmployeeApp';
+import NoWorkspace from './employee/NoWorkspace';
 
 // Admin console + onboarding are a web-only, desktop surface — they're never
 // reached on the mobile app. Code-split them so the (mobile) employee bundle
@@ -20,25 +21,34 @@ function RouteFallback() {
   return <div style={{ height: '100vh', background: '#f4f6fa' }} />;
 }
 
-function RequireAuth({ children }: { children: ReactNode }) {
-  const { loading, authed } = useAuth();
+// Gate the app on having a session AND belonging to an org. `allowNoOrg` is for
+// the /no-workspace screen itself, which is the one place an org-less account is
+// meant to land. While the profile is still loading (null) we don't redirect —
+// we only divert once we know the account has no org_id.
+function RequireAuth({ children, allowNoOrg = false }: { children: ReactNode; allowNoOrg?: boolean }) {
+  const { loading, authed, profile } = useAuth();
   if (loading) return null;
   if (!authed) return <Navigate to="/" replace />;
+  if (!allowNoOrg && profile && !profile.org_id) return <Navigate to="/no-workspace" replace />;
   return <>{children}</>;
 }
 
-function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
-  const { loading, authed, role } = useAuth();
+// `requireOrg` blocks org-less accounts (used for the admin console). Onboarding
+// intentionally leaves it off, since that's where an org-less owner creates one.
+function RequireRole({ roles, requireOrg = false, children }: { roles: Role[]; requireOrg?: boolean; children: ReactNode }) {
+  const { loading, authed, role, profile } = useAuth();
   if (loading) return null;
   if (!authed) return <Navigate to="/" replace />;
   if (!roles.includes(role)) return <Navigate to="/app" replace />;
+  if (requireOrg && profile && !profile.org_id) return <Navigate to="/no-workspace" replace />;
   return <>{children}</>;
 }
 
 const router = createHashRouter([
   { path: '/', element: <Login /> },
+  { path: '/no-workspace', element: <RequireAuth allowNoOrg><NoWorkspace /></RequireAuth> },
   { path: '/app', element: <RequireAuth><EmployeeApp /></RequireAuth> },
-  { path: '/admin', element: <RequireRole roles={['owner', 'hr', 'manager']}><Suspense fallback={<RouteFallback />}><AdminApp /></Suspense></RequireRole> },
+  { path: '/admin', element: <RequireRole roles={['owner', 'hr', 'manager']} requireOrg><Suspense fallback={<RouteFallback />}><AdminApp /></Suspense></RequireRole> },
   { path: '/onboarding', element: <RequireRole roles={['owner', 'hr']}><Suspense fallback={<RouteFallback />}><OnboardingApp /></Suspense></RequireRole> },
 ]);
 
