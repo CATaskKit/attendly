@@ -21,26 +21,29 @@ function RouteFallback() {
   return <div style={{ height: '100vh', background: '#f4f6fa' }} />;
 }
 
-// Gate the app on having a session AND belonging to an org. `allowNoOrg` is for
-// the /no-workspace screen itself, which is the one place an org-less account is
-// meant to land. While the profile is still loading (null) we don't redirect —
-// we only divert once we know the account has no org_id.
+// Gate the app on having a session AND belonging to an org. We must wait for
+// `profileReady` before deciding: until the profile resolves we can't tell "no
+// workspace" from "still loading", and a null/org-less profile MUST be treated
+// as no-workspace (that's the hole that let signed-in but org-less users in).
+// `allowNoOrg` is for the /no-workspace screen itself.
 function RequireAuth({ children, allowNoOrg = false }: { children: ReactNode; allowNoOrg?: boolean }) {
-  const { loading, authed, profile } = useAuth();
+  const { loading, profileReady, authed, profile } = useAuth();
   if (loading) return null;
   if (!authed) return <Navigate to="/" replace />;
-  if (!allowNoOrg && profile && !profile.org_id) return <Navigate to="/no-workspace" replace />;
+  if (!profileReady) return null;
+  if (!allowNoOrg && !profile?.org_id) return <Navigate to="/no-workspace" replace />;
   return <>{children}</>;
 }
 
 // `requireOrg` blocks org-less accounts (used for the admin console). Onboarding
 // intentionally leaves it off, since that's where an org-less owner creates one.
 function RequireRole({ roles, requireOrg = false, children }: { roles: Role[]; requireOrg?: boolean; children: ReactNode }) {
-  const { loading, authed, role, profile } = useAuth();
+  const { loading, profileReady, authed, role, profile } = useAuth();
   if (loading) return null;
   if (!authed) return <Navigate to="/" replace />;
+  if (!profileReady) return null;
   if (!roles.includes(role)) return <Navigate to="/app" replace />;
-  if (requireOrg && profile && !profile.org_id) return <Navigate to="/no-workspace" replace />;
+  if (requireOrg && !profile?.org_id) return <Navigate to="/no-workspace" replace />;
   return <>{children}</>;
 }
 

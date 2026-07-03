@@ -356,17 +356,18 @@ const loginStyles: Record<string, CSSProperties> = {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { authed, loading, role, profile, recovery } = useAuth();
+  const { authed, loading, profileReady, role, profile, recovery } = useAuth();
   const vars = themeVars(DEFAULT_TWEAKS);
   const isResetLink = recovery || new URLSearchParams(window.location.search).has('reset-password');
 
   // Already signed in → route to the right home for the role (admins land in the
-  // admin console, everyone else in the employee app). A password-recovery
+  // admin console, everyone else in the employee app). Wait for the profile so
+  // we route by the real org/role, not a null mid-load. A password-recovery
   // session must NOT auto-route — keep the user on the set-new-password screen.
   useEffect(() => {
-    if (loading || !authed || isResetLink) return;
+    if (loading || !authed || !profileReady || isResetLink) return;
     navigate(landingFor(role, profile?.org_id ?? null), { replace: true });
-  }, [authed, loading, role, profile, isResetLink, navigate]);
+  }, [authed, loading, profileReady, role, profile, isResetLink, navigate]);
 
   // While auth is resolving — or when already signed in and about to redirect —
   // show a branded loader instead of flashing the login form. Keep the same

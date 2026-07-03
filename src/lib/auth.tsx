@@ -24,6 +24,8 @@ export type Profile = {
 type AuthContextValue = {
   configured: boolean;
   loading: boolean;
+  /** true once the signed-in user's profile has resolved — gates org checks. */
+  profileReady: boolean;
   session: Session | null;
   profile: Profile | null;
   role: Role;
@@ -68,29 +70,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  // True once the profile fetch for the current session has resolved (success
+  // or failure). The org gate must wait for this: until the profile is known we
+  // can't tell "no workspace" from "still loading", and letting a signed-in but
+  // profile-less user through is exactly the hole that lets no-org users in.
+  const [profileReady, setProfileReady] = useState(false);
   const [demo, setDemo] = useState(false);
   const [recovery, setRecovery] = useState(false);
 
   // Load (and keep fresh) the session + profile when Supabase is configured.
   useEffect(() => {
-    if (!supabase) { setLoading(false); return; }
+    if (!supabase) { setProfileReady(true); setLoading(false); return; }
     let active = true;
 
     const loadProfile = async (uid: string) => {
-      const { data } = await supabase!.from('profiles').select('*').eq('id', uid).single();
-      if (active) setProfile((data as Profile) ?? null);
+      const { data, error } = await supabase!.from('profiles').select('*').eq('id', uid).single();
+      if (!active) return;
+      // A transient fetch error (e.g. offline) shouldn't null out an existing
+      // profile and bounce an active user to /no-workspace. Only a real "0 rows"
+      // (PGRST116) means the account genuinely has no profile.
+      if (error && error.code !== 'PGRST116') { setProfileReady(true); return; }
+      setProfile((data as Profile) ?? null);
+      setProfileReady(true);
     };
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return;
       setSession(data.session);
-      // On native the landing is always the employee app, so don't block entry
-      // on the profile fetch — load it in the background. Web waits because it
-      // needs the role to route (owner/HR → admin console).
-      if (data.session) {
-        if (Capacitor.isNativePlatform()) void loadProfile(data.session.user.id);
-        else await loadProfile(data.session.user.id);
-      }
+      // Always wait for the profile before we consider auth resolved — the org
+      // membership gate depends on it (on every platform). No session → nothing
+      // to load, so it's already "ready".
+      if (data.session) await loadProfile(data.session.user.id);
+      else setProfileReady(true);
       setLoading(false);
     });
 
@@ -103,8 +114,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // password instead of silently logging the user in (magic-link behaviour).
       if (_e === 'PASSWORD_RECOVERY') setRecovery(true);
       setSession(s);
+      // Refresh the profile in the background — don't drop profileReady here, or
+      // routine token refreshes would blank the app. First-load readiness is
+      // established by getSession above (and signIn below).
       if (s) setTimeout(() => { void loadProfile(s.user.id); }, 0);
-      else setProfile(null);
+      else { setProfile(null); setProfileReady(true); }
     });
     return () => { active = false; sub.subscription.unsubscribe(); };
   }, []);
@@ -130,6 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setProfile(prof);
     }
+    setProfileReady(true);
     return { role: prof?.role, orgId: prof?.org_id ?? null };
   };
 
@@ -237,6 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthContextValue = {
     configured: isSupabaseConfigured,
     loading,
+    profileReady,
     session,
     profile: effectiveProfile,
     role,
