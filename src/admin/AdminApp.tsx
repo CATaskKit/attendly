@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase';
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
-import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, reimbursementEntitled, fetchGstDetails, saveGstDetails, listInvoices, downloadInvoice, INDIAN_STATES, SUPPLIER, type OrgBilling, type PaymentRow, type GstDetails, type Invoice } from '../lib/billing';
+import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, reimbursementEntitled, fetchGstDetails, saveGstDetails, downloadInvoice, INDIAN_STATES, SUPPLIER, type OrgBilling, type PaymentRow, type GstDetails } from '../lib/billing';
 import Settings from './Settings';
 import EmployeeImport, { type ImportRow } from './EmployeeImport';
 import InviteModal from './InviteModal';
@@ -845,7 +845,6 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
   const [seats, setSeats] = useState(0);
   const [reimbChecked, setReimbChecked] = useState(false);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [reqMgr, setReqMgr] = useState(true);
   const [gst, setGst] = useState<GstDetails | null>(null);
   const [gstSaving, setGstSaving] = useState(false);
@@ -857,7 +856,6 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
   useEffect(() => {
     if (billing?.id) {
       listPayments(billing.id).then(setPayments).catch(() => {});
-      listInvoices(billing.id).then(setInvoices).catch(() => {});
       fetchGstDetails(billing.id).then(setGst).catch(() => setGst(null));
     }
   }, [billing?.id]);
@@ -912,8 +910,6 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
     } catch { onToast('Could not update setting', 'red', 'xCircle'); }
   };
 
-  // Map a payment to its issued invoice (by payment_id) for the download button.
-  const invoiceByPayment = new Map(invoices.filter((i) => i.payment_id).map((i) => [i.payment_id as string, i]));
   const setGstField = (k: keyof GstDetails, v: string) => setGst((g) => ({ ...(g ?? { legal_name: null, gstin: null, billing_state: null, billing_address: null, billing_pincode: null }), [k]: v || null }));
   const saveGst = async () => {
     if (!billing || !gst) return;
@@ -924,9 +920,9 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
     } catch { onToast('Could not save GST details', 'red', 'xCircle'); }
     finally { setGstSaving(false); }
   };
-  const getInvoice = async (inv: Invoice) => {
-    setDlId(inv.id);
-    try { await downloadInvoice(inv); }
+  const getInvoice = async (p: PaymentRow) => {
+    setDlId(p.id);
+    try { await downloadInvoice(p); }
     catch (e) { onToast(e instanceof Error ? e.message : 'Could not download the invoice', 'red', 'xCircle'); }
     finally { setDlId(null); }
   };
@@ -1085,25 +1081,22 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
         </div>
       </ACard>
 
-      {(payments.length > 0 || invoices.length > 0) && (
+      {payments.length > 0 && (
         <ACard style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 8 }}>Payment history</div>
-          {payments.map((p) => {
-            const inv = p.payment_id ? invoiceByPayment.get(p.payment_id) : undefined;
-            return (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '9px 4px', borderTop: '1px solid var(--line)', fontSize: 13, color: 'var(--ink-2)', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 600 }}>{new Date(p.created_at).toLocaleDateString()}</span>
-                <span>{p.seats} seats</span>
-                <span style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{fmtINR(p.amount_inr)}</span>
-                <span style={{ color: 'var(--ink-3)' }}>valid till {new Date(p.period_end).toLocaleDateString()}</span>
-                {inv ? (
-                  <button onClick={() => { void getInvoice(inv); }} disabled={dlId === inv.id} style={invoiceBtn}>
-                    <AIcon name="download" size={14} color="var(--accent)" /> {dlId === inv.id ? 'Preparing…' : 'Invoice'}
-                  </button>
-                ) : <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>—</span>}
-              </div>
-            );
-          })}
+          {payments.map((p) => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '9px 4px', borderTop: '1px solid var(--line)', fontSize: 13, color: 'var(--ink-2)', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 600 }}>{new Date(p.created_at).toLocaleDateString()}</span>
+              <span>{p.seats} seats</span>
+              <span style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{fmtINR(p.amount_inr)}</span>
+              <span style={{ color: 'var(--ink-3)' }}>valid till {new Date(p.period_end).toLocaleDateString()}</span>
+              {p.payment_id ? (
+                <button onClick={() => { void getInvoice(p); }} disabled={dlId === p.id} style={invoiceBtn}>
+                  <AIcon name="download" size={14} color="var(--accent)" /> {dlId === p.id ? 'Preparing…' : 'Invoice'}
+                </button>
+              ) : <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>—</span>}
+            </div>
+          ))}
         </ACard>
       )}
 

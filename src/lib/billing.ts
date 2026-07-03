@@ -312,8 +312,12 @@ export async function listInvoices(orgId: string): Promise<Invoice[]> {
   return (data as Invoice[]) ?? [];
 }
 
-/** Fetch a single invoice's PDF (server-rendered) and trigger a browser download. */
-export async function downloadInvoice(invoice: Pick<Invoice, 'id' | 'invoice_no'>): Promise<void> {
+/**
+ * Fetch a payment's GST invoice PDF (server generates it on first request for
+ * any past payment) and trigger a browser download.
+ */
+export async function downloadInvoice(payment: Pick<PaymentRow, 'payment_id' | 'created_at'>): Promise<void> {
+  if (!payment.payment_id) throw new Error('This payment has no invoice reference');
   const s = db();
   const { data: { session } } = await s.auth.getSession();
   const base = import.meta.env.VITE_SUPABASE_URL as string;
@@ -321,7 +325,7 @@ export async function downloadInvoice(invoice: Pick<Invoice, 'id' | 'invoice_no'
   const res = await fetch(`${base}/functions/v1/invoice-pdf`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${session?.access_token}`, apikey: anon, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ invoice_id: invoice.id }),
+    body: JSON.stringify({ payment_id: payment.payment_id }),
   });
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
@@ -331,7 +335,8 @@ export async function downloadInvoice(invoice: Pick<Invoice, 'id' | 'invoice_no'
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${invoice.invoice_no.replace(/\//g, '-')}.pdf`;
+  const stamp = payment.created_at ? new Date(payment.created_at).toISOString().slice(0, 10) : 'invoice';
+  a.download = `CATaskKit-tax-invoice-${stamp}.pdf`;
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -6,23 +6,12 @@
 // payment from Razorpay to confirm capture and org ownership.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildInvoicePdf, type InvoiceDoc } from '../_shared/invoice-pdf.ts';
+import { ensureInvoiceForPayment, SUPPLIER } from '../_shared/create-invoice.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
-// Supplier (us). State code 27 = Maharashtra; a customer in Maharashtra is
-// charged CGST+SGST, everyone else IGST. Mirror of src/lib/billing.ts SUPPLIER.
-const SUPPLIER = {
-  name: 'CATaskKit',
-  gstin: '27FLWPS2525A1ZT',
-  address: 'Opp. to Lotus Court, Kharadi, Pune, Maharashtra, India – 411001',
-  state: 'Maharashtra',
-  email: 'info@cataskkit.com',
-  phone: '+91 70282 79090',
-  sac: '997331',
 };
 
 async function hmacHex(secret: string, data: string): Promise<string> {
@@ -105,76 +94,43 @@ Deno.serve(async (req) => {
     // through and the org is activated above.
     let invoiceNo: string | null = null;
     try {
-      const { data: existing } = await admin.from('invoices').select('id').eq('payment_id', razorpay_payment_id).maybeSingle();
-      if (!existing) {
-        const totalInr = (order?.amount ?? 0) / 100;
-        const taxable = Number(order?.notes?.subtotal_inr) || Math.round(totalInr / 1.18);
-        const gst = Number(order?.notes?.gst_inr) || (totalInr - taxable);
-        const { data: org } = await admin.from('organizations')
-          .select('name, legal_name, gstin, billing_state, billing_address, billing_pincode').eq('id', profile.org_id).single();
-        const customerState = (org?.billing_state ?? '').trim();
-        const intraState = customerState.toLowerCase() === SUPPLIER.state.toLowerCase();
-        const cgst = intraState ? Math.round(gst / 2) : 0;
-        const sgst = intraState ? gst - cgst : 0;
-        const igst = intraState ? 0 : gst;
-        const custAddress = [org?.billing_address, org?.billing_pincode, customerState].filter(Boolean).join(', ') || null;
+      const totalInr = (order?.amount ?? 0) / 100;
+      const taxable = Number(order?.notes?.subtotal_inr) || Math.round(totalInr / 1.18);
+      const gst = Number(order?.notes?.gst_inr) || (totalInr - taxable);
+      const inv = await ensureInvoiceForPayment(admin, profile.org_id, razorpay_payment_id, { taxable, gst });
+      invoiceNo = inv?.invoice_no ?? null;
 
-        const { data: no } = await admin.rpc('allocate_invoice_no', { inv_date: new Date().toISOString() });
-        invoiceNo = no as string;
-
-        await admin.from('invoices').insert({
-          org_id: profile.org_id,
-          payment_id: razorpay_payment_id,
-          invoice_no: invoiceNo,
-          supplier_name: SUPPLIER.name,
-          supplier_gstin: SUPPLIER.gstin,
-          supplier_address: SUPPLIER.address,
-          supplier_state: SUPPLIER.state,
-          customer_name: org?.legal_name || org?.name || 'Customer',
-          customer_gstin: org?.gstin ?? null,
-          customer_state: customerState || null,
-          customer_address: custAddress,
-          sac_code: SUPPLIER.sac,
-          taxable_value: taxable,
-          cgst, sgst, igst,
-          total: taxable + gst,
-          place_of_supply: customerState || null,
-        });
-
-        // Auto-email the PDF (Resend). Skipped silently if the key isn't set;
-        // the invoice is always downloadable from Billing regardless.
-        const resendKey = Deno.env.get('RESEND_API_KEY');
-        if (resendKey && user.email) {
-          try {
-            const till = new Date(periodEnd).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-            const doc: InvoiceDoc = {
-              invoice_no: invoiceNo,
-              invoice_date: new Date().toISOString(),
-              supplier: { name: SUPPLIER.name, gstin: SUPPLIER.gstin, address: SUPPLIER.address, state: SUPPLIER.state, email: SUPPLIER.email, phone: SUPPLIER.phone },
-              customer: { name: org?.legal_name || org?.name || 'Customer', gstin: org?.gstin, state: customerState, address: custAddress },
-              sac_code: SUPPLIER.sac,
-              description: `Attendly — annual subscription (${seats ?? 0} seats) · valid till ${till}`,
-              taxable_value: taxable, cgst, sgst, igst, total: taxable + gst,
-              place_of_supply: customerState || null,
-            };
-            const pdf = await buildInvoicePdf(doc);
-            await fetch('https://api.resend.com/emails', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                from: `${SUPPLIER.name} <${SUPPLIER.email}>`,
-                to: [user.email],
-                subject: `Your ${SUPPLIER.name} tax invoice ${invoiceNo}`,
-                html: `<p>Hi,</p><p>Thank you for your payment. Your GST tax invoice <b>${invoiceNo}</b> is attached as a PDF.</p><p>You can also download it anytime from Billing in your admin console.</p><p>— ${SUPPLIER.name}</p>`,
-                attachments: [{ filename: `${invoiceNo.replace(/\//g, '-')}.pdf`, content: toBase64(pdf) }],
-              }),
-            });
-          } catch (mailErr) {
-            console.error('invoice email failed', mailErr);
-          }
+      // Auto-email the PDF (Resend). Skipped silently if the key isn't set;
+      // the invoice is always downloadable from Billing regardless.
+      const resendKey = Deno.env.get('RESEND_API_KEY');
+      if (inv && resendKey && user.email) {
+        try {
+          const till = new Date(periodEnd).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+          const doc: InvoiceDoc = {
+            invoice_no: inv.invoice_no,
+            invoice_date: inv.invoice_date ?? new Date().toISOString(),
+            supplier: { name: SUPPLIER.name, gstin: SUPPLIER.gstin, address: SUPPLIER.address, state: SUPPLIER.state, email: SUPPLIER.email, phone: SUPPLIER.phone },
+            customer: { name: inv.customer_name, gstin: inv.customer_gstin, state: inv.customer_state, address: inv.customer_address },
+            sac_code: inv.sac_code,
+            description: `Attendly — annual subscription (${seats ?? 0} seats) · valid till ${till}`,
+            taxable_value: Number(inv.taxable_value), cgst: Number(inv.cgst), sgst: Number(inv.sgst), igst: Number(inv.igst), total: Number(inv.total),
+            place_of_supply: inv.place_of_supply,
+          };
+          const pdf = await buildInvoicePdf(doc);
+          await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              from: `${SUPPLIER.name} <${SUPPLIER.email}>`,
+              to: [user.email],
+              subject: `Your ${SUPPLIER.name} tax invoice ${inv.invoice_no}`,
+              html: `<p>Hi,</p><p>Thank you for your payment. Your GST tax invoice <b>${inv.invoice_no}</b> is attached as a PDF.</p><p>You can also download it anytime from Billing in your admin console.</p><p>— ${SUPPLIER.name}</p>`,
+              attachments: [{ filename: `${inv.invoice_no.replace(/\//g, '-')}.pdf`, content: toBase64(pdf) }],
+            }),
+          });
+        } catch (mailErr) {
+          console.error('invoice email failed', mailErr);
         }
-      } else {
-        invoiceNo = null;
       }
     } catch (invErr) {
       console.error('invoice generation failed', invErr);

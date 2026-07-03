@@ -1,8 +1,11 @@
-// Edge Function: render a GST tax-invoice PDF for one invoice.
+// Edge Function: render a GST tax-invoice PDF for one payment/invoice.
 // Deploy:  supabase functions deploy invoice-pdf
 // Auth: caller must be an owner/HR admin of the org the invoice belongs to.
+// Accepts { payment_id } (preferred — generates the invoice on first download
+// for any past payment) or { invoice_id } (an already-issued invoice).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildInvoicePdf, type InvoiceDoc } from '../_shared/invoice-pdf.ts';
+import { ensureInvoiceForPayment, SUPPLIER } from '../_shared/create-invoice.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -10,22 +13,13 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const SUPPLIER = {
-  name: 'CATaskKit',
-  gstin: '27FLWPS2525A1ZT',
-  address: 'Opp. to Lotus Court, Kharadi, Pune, Maharashtra, India – 411001',
-  state: 'Maharashtra',
-  email: 'info@cataskkit.com',
-  phone: '+91 70282 79090',
-};
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
   try {
-    const { invoice_id } = await req.json().catch(() => ({}));
-    if (!invoice_id) return json({ error: 'Missing invoice_id' }, 400);
+    const { invoice_id, payment_id } = await req.json().catch(() => ({}));
+    if (!invoice_id && !payment_id) return json({ error: 'Missing payment_id or invoice_id' }, 400);
 
     const url = Deno.env.get('SUPABASE_URL')!;
     const anon = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -38,9 +32,12 @@ Deno.serve(async (req) => {
     if (!profile?.org_id || !['owner', 'hr'].includes(profile.role)) return json({ error: 'Only an owner or HR admin can view invoices' }, 403);
 
     const admin = createClient(url, service);
-    const { data: inv } = await admin.from('invoices').select('*').eq('id', invoice_id).single();
-    if (!inv || inv.org_id !== profile.org_id) return json({ error: 'Invoice not found' }, 404);
+    const inv = payment_id
+      ? await ensureInvoiceForPayment(admin, profile.org_id, payment_id)
+      : (await admin.from('invoices').select('*').eq('id', invoice_id).single()).data;
+    if (!inv || inv.org_id !== profile.org_id) return json({ error: 'Invoice not found for this payment' }, 404);
 
+    // Line description from the payment (seats + valid-till), best effort.
     let description = 'Attendly — annual subscription';
     if (inv.payment_id) {
       const { data: pay } = await admin.from('billing_payments').select('seats, period_end').eq('payment_id', inv.payment_id).single();
