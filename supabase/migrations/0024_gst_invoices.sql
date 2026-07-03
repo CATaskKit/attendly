@@ -18,21 +18,23 @@ create table if not exists invoice_counters (
 alter table invoice_counters enable row level security; -- service_role only
 
 -- Atomically bump and return the next number for the invoice's financial year.
+-- Local variables are v_-prefixed so they never collide with the invoice_counters
+-- columns (e.g. `fy`), which would make `on conflict (fy)` ambiguous.
 create or replace function public.allocate_invoice_no(inv_date timestamptz)
 returns text language plpgsql security definer set search_path = public as $$
 declare
-  y  int := extract(year  from inv_date at time zone 'Asia/Kolkata');
-  m  int := extract(month from inv_date at time zone 'Asia/Kolkata');
-  fy_start int;
-  fy text;
-  n  int;
+  v_year  int := extract(year  from inv_date at time zone 'Asia/Kolkata');
+  v_month int := extract(month from inv_date at time zone 'Asia/Kolkata');
+  v_start int;
+  v_fy    text;
+  v_seq   int;
 begin
-  fy_start := case when m >= 4 then y else y - 1 end;   -- Indian FY starts April
-  fy := lpad((fy_start % 100)::text, 2, '0') || '-' || lpad(((fy_start + 1) % 100)::text, 2, '0');
-  insert into invoice_counters (fy, last_seq) values (fy, 1)
+  v_start := case when v_month >= 4 then v_year else v_year - 1 end;   -- Indian FY starts April
+  v_fy := lpad((v_start % 100)::text, 2, '0') || '-' || lpad(((v_start + 1) % 100)::text, 2, '0');
+  insert into invoice_counters (fy, last_seq) values (v_fy, 1)
     on conflict (fy) do update set last_seq = invoice_counters.last_seq + 1
-    returning last_seq into n;
-  return 'CTK/' || fy || '/' || lpad(n::text, 4, '0');
+    returning last_seq into v_seq;
+  return 'CTK/' || v_fy || '/' || lpad(v_seq::text, 4, '0');
 end $$;
 
 revoke execute on function public.allocate_invoice_no(timestamptz) from public;
