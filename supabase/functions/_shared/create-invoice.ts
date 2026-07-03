@@ -32,10 +32,12 @@ export async function ensureInvoiceForPayment(
   opts?: { taxable?: number; gst?: number },
 // deno-lint-ignore no-explicit-any
 ): Promise<any | null> {
-  const { data: existing } = await admin.from('invoices').select('*').eq('payment_id', paymentId).maybeSingle();
+  const { data: existing, error: exErr } = await admin.from('invoices').select('*').eq('payment_id', paymentId).maybeSingle();
+  if (exErr) throw new Error(`invoices lookup failed: ${exErr.message}`);
   if (existing) return existing;
 
-  const { data: pay } = await admin.from('billing_payments').select('amount_inr').eq('payment_id', paymentId).eq('org_id', orgId).maybeSingle();
+  const { data: pay, error: payErr } = await admin.from('billing_payments').select('amount_inr').eq('payment_id', paymentId).eq('org_id', orgId).maybeSingle();
+  if (payErr) throw new Error(`payment lookup failed: ${payErr.message}`);
   if (!pay) return null;
 
   const total = Number(pay.amount_inr);
@@ -51,7 +53,8 @@ export async function ensureInvoiceForPayment(
   const igst = intra ? 0 : gst;
   const customer_address = [org?.billing_address, org?.billing_pincode, customerState].filter(Boolean).join(', ') || null;
 
-  const { data: no } = await admin.rpc('allocate_invoice_no', { inv_date: new Date().toISOString() });
+  const { data: no, error: noErr } = await admin.rpc('allocate_invoice_no', { inv_date: new Date().toISOString() });
+  if (noErr || !no) throw new Error(`invoice numbering failed: ${noErr?.message ?? 'no number returned (is migration 0024 applied & schema cache reloaded?)'}`);
   const row = {
     org_id: orgId,
     payment_id: paymentId,
@@ -75,7 +78,8 @@ export async function ensureInvoiceForPayment(
   if (error) {
     // Race: another request inserted first (payment_id is unique). Return that.
     const { data: again } = await admin.from('invoices').select('*').eq('payment_id', paymentId).maybeSingle();
-    return again ?? null;
+    if (again) return again;
+    throw new Error(`invoice insert failed: ${error.message}`);
   }
   return inserted;
 }
