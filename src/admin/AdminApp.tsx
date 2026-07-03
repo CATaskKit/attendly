@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase';
 import { fetchExportData, downloadWorkbook, downloadWorkbookServer, SHEETS, type ExportData } from '../lib/export';
 import { listNotifications, markAllNotificationsRead, markNotificationRead, type Notification } from '../lib/api';
 import { onTablesChange, onTableChange } from '../lib/realtime';
-import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, reimbursementEntitled, type OrgBilling, type PaymentRow } from '../lib/billing';
+import { fetchBilling, startCheckout, listPayments, planFor, seatLimit, periodDaysLeft, atSeatLimit, isPaid, quoteFor, rateFor, fmtINR, TIERS, FREE_SEAT_LIMIT, REIMBURSEMENT_RATE, addonAnnual, reimbursementActive, reimbursementEntitled, fetchGstDetails, saveGstDetails, listInvoices, downloadInvoice, INDIAN_STATES, SUPPLIER, type OrgBilling, type PaymentRow, type GstDetails, type Invoice } from '../lib/billing';
 import Settings from './Settings';
 import EmployeeImport, { type ImportRow } from './EmployeeImport';
 import InviteModal from './InviteModal';
@@ -836,19 +836,30 @@ function NotificationBell() {
 // ── Billing (Razorpay · annual per-seat tiers) ────────────────────────
 const payBtn: CSSProperties = { height: 42, padding: '0 22px', borderRadius: 11, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
 const seatInput: CSSProperties = { width: 110, height: 42, borderRadius: 11, border: '1px solid var(--line)', padding: '0 12px', fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', background: '#fff', outline: 'none' };
+const gstLabel: CSSProperties = { fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', marginBottom: 5 };
+const gstInput = (enabled: boolean): CSSProperties => ({ width: '100%', height: 40, borderRadius: 10, border: '1px solid var(--line)', padding: '0 11px', fontSize: 14, fontWeight: 600, color: 'var(--ink-1)', background: enabled ? '#fff' : 'var(--soft)', outline: 'none' });
+const invoiceBtn: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--accent)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' };
 
 function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billing: OrgBilling | null; seatsUsed: number; canManage: boolean; onToast: (t: string, tone?: string, icon?: string) => void; onRefresh: () => void }) {
   const [busy, setBusy] = useState(false);
   const [seats, setSeats] = useState(0);
   const [reimbChecked, setReimbChecked] = useState(false);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [reqMgr, setReqMgr] = useState(true);
+  const [gst, setGst] = useState<GstDetails | null>(null);
+  const [gstSaving, setGstSaving] = useState(false);
+  const [dlId, setDlId] = useState<string | null>(null);
 
   useEffect(() => {
     if (billing) setSeats((s) => s || Math.max(seatsUsed, billing.seats ?? 0, 1));
   }, [billing, seatsUsed]);
   useEffect(() => {
-    if (billing?.id) listPayments(billing.id).then(setPayments).catch(() => {});
+    if (billing?.id) {
+      listPayments(billing.id).then(setPayments).catch(() => {});
+      listInvoices(billing.id).then(setInvoices).catch(() => {});
+      fetchGstDetails(billing.id).then(setGst).catch(() => setGst(null));
+    }
   }, [billing?.id]);
   useEffect(() => {
     if (billing) setReqMgr(billing.reimbursement_require_manager);
@@ -899,6 +910,25 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
       onToast(on ? 'Reimbursement turned on' : 'Reimbursement turned off — all its features are now hidden', on ? 'green' : 'amber', 'receipt');
       onRefresh();
     } catch { onToast('Could not update setting', 'red', 'xCircle'); }
+  };
+
+  // Map a payment to its issued invoice (by payment_id) for the download button.
+  const invoiceByPayment = new Map(invoices.filter((i) => i.payment_id).map((i) => [i.payment_id as string, i]));
+  const setGstField = (k: keyof GstDetails, v: string) => setGst((g) => ({ ...(g ?? { legal_name: null, gstin: null, billing_state: null, billing_address: null, billing_pincode: null }), [k]: v || null }));
+  const saveGst = async () => {
+    if (!billing || !gst) return;
+    setGstSaving(true);
+    try {
+      await saveGstDetails(billing.id, gst);
+      onToast('GST / billing details saved', 'green', 'checkCircle');
+    } catch { onToast('Could not save GST details', 'red', 'xCircle'); }
+    finally { setGstSaving(false); }
+  };
+  const getInvoice = async (inv: Invoice) => {
+    setDlId(inv.id);
+    try { await downloadInvoice(inv); }
+    catch (e) { onToast(e instanceof Error ? e.message : 'Could not download the invoice', 'red', 'xCircle'); }
+    finally { setDlId(null); }
   };
 
   return (
@@ -1014,17 +1044,66 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
         )}
       </ACard>
 
-      {payments.length > 0 && (
+      <ACard style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AIcon name="receipt" size={19} color="var(--accent)" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>GST / billing details</div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Printed on your tax invoices. Your state decides the CGST+SGST vs IGST split.</div>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginTop: 12 }}>
+          <div>
+            <div style={gstLabel}>Registered name</div>
+            <input value={gst?.legal_name ?? ''} disabled={!canManage} onChange={(e) => setGstField('legal_name', e.target.value)} placeholder="Legal name on GST" style={gstInput(canManage)} />
+          </div>
+          <div>
+            <div style={gstLabel}>GSTIN</div>
+            <input value={gst?.gstin ?? ''} disabled={!canManage} onChange={(e) => setGstField('gstin', e.target.value.toUpperCase())} placeholder="e.g. 27ABCDE1234F1Z5" maxLength={15} style={gstInput(canManage)} />
+          </div>
+          <div>
+            <div style={gstLabel}>State (place of supply)</div>
+            <select value={gst?.billing_state ?? ''} disabled={!canManage} onChange={(e) => setGstField('billing_state', e.target.value)} style={gstInput(canManage)}>
+              <option value="">Select state…</option>
+              {INDIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={gstLabel}>PIN code</div>
+            <input value={gst?.billing_pincode ?? ''} disabled={!canManage} onChange={(e) => setGstField('billing_pincode', e.target.value)} placeholder="411001" maxLength={6} style={gstInput(canManage)} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={gstLabel}>Billing address</div>
+            <input value={gst?.billing_address ?? ''} disabled={!canManage} onChange={(e) => setGstField('billing_address', e.target.value)} placeholder="Street, area, city" style={gstInput(canManage)} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
+          {canManage && <button onClick={() => { void saveGst(); }} disabled={gstSaving} style={{ ...payBtn, opacity: gstSaving ? 0.7 : 1 }}>{gstSaving ? 'Saving…' : 'Save details'}</button>}
+          <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>Invoices are issued by {SUPPLIER.legalName} · GSTIN {SUPPLIER.gstin} ({SUPPLIER.state}).</span>
+        </div>
+      </ACard>
+
+      {(payments.length > 0 || invoices.length > 0) && (
         <ACard style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 8 }}>Payment history</div>
-          {payments.map((p) => (
-            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 4px', borderTop: '1px solid var(--line)', fontSize: 13, color: 'var(--ink-2)', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 600 }}>{new Date(p.created_at).toLocaleDateString()}</span>
-              <span>{p.seats} seats</span>
-              <span style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{fmtINR(p.amount_inr)}</span>
-              <span style={{ color: 'var(--ink-3)' }}>valid till {new Date(p.period_end).toLocaleDateString()}</span>
-            </div>
-          ))}
+          {payments.map((p) => {
+            const inv = p.payment_id ? invoiceByPayment.get(p.payment_id) : undefined;
+            return (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '9px 4px', borderTop: '1px solid var(--line)', fontSize: 13, color: 'var(--ink-2)', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600 }}>{new Date(p.created_at).toLocaleDateString()}</span>
+                <span>{p.seats} seats</span>
+                <span style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{fmtINR(p.amount_inr)}</span>
+                <span style={{ color: 'var(--ink-3)' }}>valid till {new Date(p.period_end).toLocaleDateString()}</span>
+                {inv ? (
+                  <button onClick={() => { void getInvoice(inv); }} disabled={dlId === inv.id} style={invoiceBtn}>
+                    <AIcon name="download" size={14} color="var(--accent)" /> {dlId === inv.id ? 'Preparing…' : 'Invoice'}
+                  </button>
+                ) : <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>—</span>}
+              </div>
+            );
+          })}
         </ACard>
       )}
 

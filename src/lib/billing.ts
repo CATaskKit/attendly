@@ -51,6 +51,63 @@ export const gstOn = (base: number) => Math.round(base * GST_RATE);
 /** Base amount plus 18% GST. */
 export const withGst = (base: number) => base + gstOn(base);
 
+// ── GST invoicing ─────────────────────────────────────────────────────
+// The supplier (us). GSTIN state code 27 = Maharashtra. Keep in sync with the
+// snapshot the server writes in verify-payment.
+export const SUPPLIER = {
+  legalName: 'CATaskKit',
+  gstin: '27FLWPS2525A1ZT',
+  address: 'Opp. to Lotus Court, Kharadi, Pune, Maharashtra, India – 411001',
+  state: 'Maharashtra',
+  email: 'info@cataskkit.com',
+  phone: '+91 70282 79090',
+  sac: '997331',
+} as const;
+
+/** Indian states/UTs for the billing-details dropdown (place of supply). */
+export const INDIAN_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Delhi', 'Goa', 'Gujarat',
+  'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh',
+  'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry',
+  'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal', 'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Lakshadweep',
+] as const;
+
+export type TaxSplit = { taxable: number; cgst: number; sgst: number; igst: number; total: number; intraState: boolean };
+/**
+ * Split an 18% GST amount into CGST+SGST (intra-state: customer in Maharashtra)
+ * or IGST (inter-state / unknown). `taxable` is the pre-GST base, `gst` the tax.
+ * Mirrors the server split in verify-payment.
+ */
+export function splitGst(taxable: number, gst: number, customerState?: string | null): TaxSplit {
+  const intraState = (customerState ?? '').trim().toLowerCase() === SUPPLIER.state.toLowerCase();
+  if (intraState) {
+    const cgst = Math.round(gst / 2);
+    return { taxable, cgst, sgst: gst - cgst, igst: 0, total: taxable + gst, intraState };
+  }
+  return { taxable, cgst: 0, sgst: 0, igst: gst, total: taxable + gst, intraState };
+}
+
+export type GstDetails = {
+  legal_name: string | null;
+  gstin: string | null;
+  billing_state: string | null;
+  billing_address: string | null;
+  billing_pincode: string | null;
+};
+
+export type Invoice = {
+  id: string;
+  invoice_no: string;
+  invoice_date: string;
+  payment_id: string | null;
+  taxable_value: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  total: number;
+};
+
 export type OrgBilling = {
   id: string;
   name: string;
@@ -218,15 +275,67 @@ export async function fetchBilling(orgId: string): Promise<OrgBilling | null> {
   return base.data ? { ...(base.data as Omit<OrgBilling, 'reimbursement_enabled' | 'reimbursement_require_manager' | 'reimbursement_disabled' | 'weekend_days' | 'weekend_sat_alt' | 'shift_start' | 'shift_end' | 'late_grace_min' | 'display_name' | 'logo_url'>), reimbursement_enabled: false, reimbursement_require_manager: true, reimbursement_disabled: false, weekend_days: [0, 6], weekend_sat_alt: null, ...SHIFT_DEFAULTS, display_name: null, logo_url: null } : null;
 }
 
-export type PaymentRow = { id: string; amount_inr: number; seats: number; period_end: string; created_at: string };
+export type PaymentRow = { id: string; payment_id: string | null; amount_inr: number; seats: number; period_end: string; created_at: string };
 
 export async function listPayments(orgId: string): Promise<PaymentRow[]> {
   if (!isSupabaseConfigured) return [];
   const { data, error } = await db().from('billing_payments')
-    .select('id,amount_inr,seats,period_end,created_at')
+    .select('id,payment_id,amount_inr,seats,period_end,created_at')
     .eq('org_id', orgId).order('created_at', { ascending: false }).limit(24);
   if (error) throw error;
   return (data as PaymentRow[]) ?? [];
+}
+
+/** Current GST/billing details for the org's invoices (nulls before migration). */
+export async function fetchGstDetails(orgId: string): Promise<GstDetails> {
+  const empty: GstDetails = { legal_name: null, gstin: null, billing_state: null, billing_address: null, billing_pincode: null };
+  if (!isSupabaseConfigured) return empty;
+  const { data, error } = await db().from('organizations')
+    .select('legal_name,gstin,billing_state,billing_address,billing_pincode').eq('id', orgId).single();
+  if (error) return empty; // columns not migrated yet
+  return { ...empty, ...(data as Partial<GstDetails>) };
+}
+
+/** Save the org's GST/billing details (admin only, via the org update policy). */
+export async function saveGstDetails(orgId: string, fields: Partial<GstDetails>): Promise<void> {
+  const { error } = await db().from('organizations').update(fields).eq('id', orgId);
+  if (error) throw error;
+}
+
+/** Invoices issued to the org, newest first (keyed to payments by payment_id). */
+export async function listInvoices(orgId: string): Promise<Invoice[]> {
+  if (!isSupabaseConfigured) return [];
+  const { data, error } = await db().from('invoices')
+    .select('id,invoice_no,invoice_date,payment_id,taxable_value,cgst,sgst,igst,total')
+    .eq('org_id', orgId).order('invoice_date', { ascending: false }).limit(48);
+  if (error) return []; // table not migrated yet
+  return (data as Invoice[]) ?? [];
+}
+
+/** Fetch a single invoice's PDF (server-rendered) and trigger a browser download. */
+export async function downloadInvoice(invoice: Pick<Invoice, 'id' | 'invoice_no'>): Promise<void> {
+  const s = db();
+  const { data: { session } } = await s.auth.getSession();
+  const base = import.meta.env.VITE_SUPABASE_URL as string;
+  const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+  const res = await fetch(`${base}/functions/v1/invoice-pdf`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session?.access_token}`, apikey: anon, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ invoice_id: invoice.id }),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error((j as { error?: string }).error || 'Could not download the invoice');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${invoice.invoice_no.replace(/\//g, '-')}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ── Razorpay Checkout ─────────────────────────────────────────────────
