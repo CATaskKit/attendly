@@ -43,6 +43,14 @@ export function annualTotal(seats: number): number {
 export const fmtINR = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
+// GST — the business is GST-registered, so 18% is added on top of every charge
+// at checkout. The server (create-order) is the source of truth; these mirror it.
+export const GST_RATE = 0.18;
+/** 18% GST on a base (pre-tax) amount, rounded to the rupee. */
+export const gstOn = (base: number) => Math.round(base * GST_RATE);
+/** Base amount plus 18% GST. */
+export const withGst = (base: number) => base + gstOn(base);
+
 export type OrgBilling = {
   id: string;
   name: string;
@@ -119,7 +127,23 @@ export function reimbursementActive(b: Pick<OrgBilling, 'reimbursement_enabled' 
   return !b.reimbursement_disabled && reimbursementEntitled(b);
 }
 
-export type Quote = { amount: number; addonAmount: number; prorated: boolean; renewal: boolean; periodEnd: Date; annualAtRenewal: number };
+export type Quote = {
+  /** Seat + add-on subtotal (pre-GST), prorated. */
+  amount: number;
+  /** Reimbursement add-on portion of the subtotal (pre-GST). */
+  addonAmount: number;
+  /** 18% GST on the subtotal. */
+  gst: number;
+  /** Grand total actually charged = amount + gst. */
+  total: number;
+  prorated: boolean;
+  renewal: boolean;
+  periodEnd: Date;
+  /** Annual subtotal at renewal (pre-GST). */
+  annualAtRenewal: number;
+  /** Annual total at renewal including 18% GST. */
+  totalAtRenewal: number;
+};
 /**
  * What it costs *right now* to run `newSeats` employees (and optionally enable
  * the reimbursement add-on). Inside an open period we charge only the additional
@@ -146,13 +170,19 @@ export function quoteFor(
     ? (wantReimb && !alreadyReimb ? addonRate : 0) // enabling within the period
     : (wantReimb ? addonRate : 0);                  // fresh year includes it if wanted
 
+  const subtotal = Math.max(0, Math.round((seatYr + addonYr) * frac));
+  const gst = gstOn(subtotal);
+  const annualAtRenewal = annualTotal(newSeats) + (wantReimb ? addonRate : 0);
   return {
-    amount: Math.max(0, Math.round((seatYr + addonYr) * frac)),
+    amount: subtotal,
     addonAmount: Math.max(0, Math.round(addonYr * frac)),
+    gst,
+    total: subtotal + gst,
     prorated: valid && frac < 1,
     renewal: !valid,
     periodEnd: valid ? new Date(b.current_period_end!) : new Date(Date.now() + YEAR_MS),
-    annualAtRenewal: annualTotal(newSeats) + (wantReimb ? addonRate : 0),
+    annualAtRenewal,
+    totalAtRenewal: withGst(annualAtRenewal),
   };
 }
 

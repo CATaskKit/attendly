@@ -968,14 +968,16 @@ function Billing({ billing, seatsUsed, canManage, onToast, onRefresh }: { billin
                   {seatPortion > 0 && <>Seats <b style={{ color: 'var(--ink-1)' }}>{fmtINR(seatPortion)}</b></>}
                   {seatPortion > 0 && quote.addonAmount > 0 && <span style={{ color: 'var(--ink-3)' }}> + </span>}
                   {quote.addonAmount > 0 && <>Reimbursement <b style={{ color: 'var(--ink-1)' }}>{fmtINR(quote.addonAmount)}</b></>}
-                  {' = '}<b style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(quote.amount)}</b> {quote.prorated ? <span style={{ color: 'var(--ink-3)' }}>now (prorated to {quote.periodEnd.toLocaleDateString()})</span> : quote.renewal ? '/ year' : 'now'}
+                  {' = '}<b style={{ color: 'var(--ink-1)' }}>{fmtINR(quote.amount)}</b>
+                  <span style={{ color: 'var(--ink-3)' }}> + GST 18% </span><b style={{ color: 'var(--ink-1)' }}>{fmtINR(quote.gst)}</b>
+                  {' = '}<b style={{ color: 'var(--ink-1)', fontWeight: 800 }}>{fmtINR(quote.total)}</b> {quote.prorated ? <span style={{ color: 'var(--ink-3)' }}>now (prorated to {quote.periodEnd.toLocaleDateString()})</span> : quote.renewal ? '/ year' : 'now'}
                 </>
               ) : <span style={{ color: 'var(--ink-3)' }}>Nothing due — add seats (6+) or tick the add-on.</span>}
             </div>
-            <button onClick={() => { void pay(); }} disabled={busy || quote.amount <= 0} style={{ ...payBtn, marginLeft: 'auto', opacity: busy || quote.amount <= 0 ? 0.7 : 1 }}>{busy ? 'Processing…' : `Pay ${fmtINR(quote.amount)}`}</button>
+            <button onClick={() => { void pay(); }} disabled={busy || quote.total <= 0} style={{ ...payBtn, marginLeft: 'auto', opacity: busy || quote.total <= 0 ? 0.7 : 1 }}>{busy ? 'Processing…' : `Pay ${fmtINR(quote.total)}`}</button>
           </div>
           <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 10 }}>
-            {quote.renewal ? 'Starts a fresh 1-year period.' : `Prorated for the days left in your period; renews at ${fmtINR(quote.annualAtRenewal)}/year.`} Minimum {minSeats} seat{minSeats === 1 ? '' : 's'} (your roster). UPI, cards & netbanking accepted.
+            {quote.renewal ? 'Starts a fresh 1-year period.' : `Prorated for the days left in your period; renews at ${fmtINR(quote.totalAtRenewal)}/year.`} Prices include 18% GST. Minimum {minSeats} seat{minSeats === 1 ? '' : 's'} (your roster). UPI, cards & netbanking accepted.
           </div>
         </ACard>
       )}

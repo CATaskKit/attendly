@@ -16,6 +16,7 @@ const annual = (seats: number) => rate(seats) * seats * 12;
 const REIMBURSEMENT_RATE = 5; // ₹/employee/month add-on; keep in sync with billing.ts
 const addonAnnual = (seats: number) => REIMBURSEMENT_RATE * seats * 12;
 const YEAR_MS = 365 * 86400000;
+const GST_RATE = 0.18; // 18% GST added on top of every charge; keep in sync with billing.ts
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -60,11 +61,14 @@ Deno.serve(async (req) => {
 
     const seatYr = valid ? annual(seats) - annual(paidSeats) : annual(seats);
     const addonYr = valid ? (wantReimb && !alreadyReimb ? addonRate : 0) : (wantReimb ? addonRate : 0);
-    const amountInr = Math.max(0, Math.round((seatYr + addonYr) * fraction));
+    const amountInr = Math.max(0, Math.round((seatYr + addonYr) * fraction)); // pre-GST subtotal
     if (amountInr <= 0) {
       return json({ error: seats <= 5 ? 'Up to 5 employees are free — reimbursement is included, no payment needed' : 'No additional charge needed' }, 400);
     }
-    const amount = amountInr * 100; // paise
+    // Business is GST-registered — add 18% GST on top of the subtotal.
+    const gstInr = Math.round(amountInr * GST_RATE);
+    const totalInr = amountInr + gstInr;
+    const amount = totalInr * 100; // paise, GST-inclusive
     const newPeriodEnd = (valid ? new Date(periodEndMs) : new Date(now + YEAR_MS)).toISOString();
 
     const res = await fetch('https://api.razorpay.com/v1/orders', {
@@ -74,7 +78,7 @@ Deno.serve(async (req) => {
         amount,
         currency: 'INR',
         receipt: `attendly_${Date.now()}`,
-        notes: { org_id: profile.org_id, seats: String(seats), period_end: newPeriodEnd, reimbursement: String(wantReimb) },
+        notes: { org_id: profile.org_id, seats: String(seats), period_end: newPeriodEnd, reimbursement: String(wantReimb), subtotal_inr: String(amountInr), gst_inr: String(gstInr), gst_rate: '0.18' },
       }),
     });
     const order = await res.json();
