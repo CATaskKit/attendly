@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
 
     const accessToken = await getAccessToken(sa);
     const endpoint = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
-    const title = record.title || 'eHajeri';
+    const title = record.title || 'eHajri';
     const bodyText = record.body || '';
 
     const results = await Promise.all(tokens.map(async ({ token }) => {
@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
         message: {
           token,
           notification: { title, body: bodyText },
-          android: { priority: 'HIGH', notification: { sound: 'default', channel_id: 'attendly_default' } },
+          android: { priority: 'HIGH', notification: { sound: 'default', channel_id: 'ehajri_default' } },
           data: { type: String(record.type ?? ''), id: String(record.id ?? '') },
         },
       };

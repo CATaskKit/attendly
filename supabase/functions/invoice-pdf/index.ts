@@ -38,12 +38,12 @@ Deno.serve(async (req) => {
     if (!inv || inv.org_id !== profile.org_id) return json({ error: 'Invoice not found for this payment' }, 404);
 
     // Line description from the payment (seats + valid-till), best effort.
-    let description = 'eHajeri — annual subscription';
+    let description = 'eHajri — annual subscription';
     if (inv.payment_id) {
       const { data: pay } = await admin.from('billing_payments').select('seats, period_end').eq('payment_id', inv.payment_id).single();
       if (pay?.seats) {
         const till = pay.period_end ? new Date(pay.period_end).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
-        description = `eHajeri — annual subscription (${pay.seats} seats)${till ? ` · valid till ${till}` : ''}`;
+        description = `eHajri — annual subscription (${pay.seats} seats)${till ? ` · valid till ${till}` : ''}`;
       }
     }
 

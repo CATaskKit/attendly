@@ -106,7 +106,7 @@ export default function OnboardingApp() {
       <aside style={{ width: 290, flexShrink: 0, background: 'var(--side-bg)', borderRight: '1px solid var(--side-line)', display: 'flex', flexDirection: 'column', padding: '26px 22px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 4px 18px' }}>
           <div style={{ width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(140deg, var(--accent), var(--accent-deep))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><AIcon name="check" size={18} color="#fff" sw={2.8} /></div>
-          <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.02em' }}>eHajeri</div>
+          <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.02em' }}>eHajri</div>
         </div>
         <div style={{ padding: '8px 6px 18px' }}>
           <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>Get started</div>

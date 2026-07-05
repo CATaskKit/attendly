@@ -9,7 +9,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace "com.cataskkit.attendly"
+    namespace "com.cataskkit.ehajri"
     compileSdk rootProject.ext.compileSdkVersion
     signingConfigs {
         release {
@@ -22,7 +22,7 @@ android {
         }
     }
     defaultConfig {
-        applicationId "com.cataskkit.attendly"
+        applicationId "com.cataskkit.ehajri"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 5

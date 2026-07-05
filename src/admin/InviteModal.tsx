@@ -49,7 +49,7 @@ export default function InviteModal({ employee, canManage, onClose, onToast }: {
 
   const message =
     `Hi ${employee.name},\n\n` +
-    `You've been added to our eHajeri workspace. To get started:\n` +
+    `You've been added to our eHajri workspace. To get started:\n` +
     `1. Open ${APP_URL}\n` +
     `2. Tap "Join your workspace"\n` +
     `3. Sign up with your work email (${email || 'your email'}) and set a password.\n\n` +

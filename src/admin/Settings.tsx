@@ -79,7 +79,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 // every admin/device); a localStorage copy gives an instant first paint and a
 // demo-mode fallback when Supabase isn't configured.
 function useOrgSetting<T>(orgId: string | null, key: string, fallback: T): [T, (v: T) => void] {
-  const storeKey = `attendly:settings:${orgId ?? 'demo'}:${key}`;
+  const storeKey = `ehajri:settings:${orgId ?? 'demo'}:${key}`;
   const [val, setVal] = useState<T>(() => {
     try { const raw = localStorage.getItem(storeKey); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
   });
@@ -282,7 +282,7 @@ function matrixFromGrid(grid: number[][]): PermMatrix {
   PERMS.forEach((p, r) => { m[p.k] = {}; ROLE_NAMES.forEach((role, c) => { m[p.k][role] = !!grid[r][c]; }); });
   return m;
 }
-const rolePermsLocalKey = (orgId: string | null) => `attendly:settings:${orgId ?? 'demo'}:rolePerms`;
+const rolePermsLocalKey = (orgId: string | null) => `ehajri:settings:${orgId ?? 'demo'}:rolePerms`;
 
 function RolesSettings({ orgId, canManage, notify }: SectionProps) {
   const [grid, setGrid] = useState<number[][]>(() => PERMS.map((p) => p.def.slice()));

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">eHajeri</string>
-    <string name="title_activity_main">eHajeri</string>
-    <string name="package_name">com.cataskkit.attendly</string>
-    <string name="custom_url_scheme">com.cataskkit.attendly</string>
+    <string name="app_name">eHajri</string>
+    <string name="title_activity_main">eHajri</string>
+    <string name="package_name">com.cataskkit.ehajri</string>
+    <string name="custom_url_scheme">com.cataskkit.ehajri</string>
 </resources>

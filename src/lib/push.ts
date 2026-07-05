@@ -20,8 +20,8 @@ export async function initPush(onOpen?: (data: Record<string, unknown>) => void)
     // or killed-app pushes won't render). Ignore failures (iOS / older Android).
     try {
       await PushNotifications.createChannel({
-        id: 'attendly_default',
-        name: 'eHajeri',
+        id: 'ehajri_default',
+        name: 'eHajri',
         description: 'Leave, attendance and announcement alerts',
         importance: 5,
         visibility: 1,
