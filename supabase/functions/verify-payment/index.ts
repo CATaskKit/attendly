@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
             supplier: { name: SUPPLIER.name, gstin: SUPPLIER.gstin, address: SUPPLIER.address, state: SUPPLIER.state, email: SUPPLIER.email, phone: SUPPLIER.phone },
             customer: { name: inv.customer_name, gstin: inv.customer_gstin, state: inv.customer_state, address: inv.customer_address },
             sac_code: inv.sac_code,
-            description: `Attendly — annual subscription (${seats ?? 0} seats) · valid till ${till}`,
+            description: `eHajeri — annual subscription (${seats ?? 0} seats) · valid till ${till}`,
             taxable_value: Number(inv.taxable_value), cgst: Number(inv.cgst), sgst: Number(inv.sgst), igst: Number(inv.igst), total: Number(inv.total),
             place_of_supply: inv.place_of_supply,
           };

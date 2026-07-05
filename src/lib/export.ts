@@ -4,7 +4,7 @@ import { saveFile, MIME } from './native';
 
 // ── Excel styling ────────────────────────────────────────────────────
 // xlsx-js-style honours a `.s` style object on each cell. We give every
-// exported table a branded header row (Attendly blue), zebra-striped body,
+// exported table a branded header row (eHajeri blue), zebra-striped body,
 // thin borders and an auto-filter so the files look finished, not raw dumps.
 const THIN = { style: 'thin', color: { rgb: 'D9DEE7' } };
 const BORDERS = { top: THIN, bottom: THIN, left: THIN, right: THIN };
@@ -116,7 +116,7 @@ export async function downloadWorkbookServer(orgName: string): Promise<string | 
   if (!res.ok) throw new Error(`Server export failed (${res.status})`);
   const blob = await res.blob();
   const stamp = new Date().toISOString().slice(0, 10);
-  const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'Attendly';
+  const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'eHajeri';
   return saveFile(`${safe}_HR_Export_${stamp}.xlsx`, blob, MIME.xlsx);
 }
 
@@ -135,7 +135,7 @@ export async function downloadWorkbook(data: ExportData, orgName: string): Promi
 
   // Summary sheet — branded title banner + label/value rows.
   const summary = [
-    ['Attendly · HR Data Export', ''],
+    ['eHajeri · HR Data Export', ''],
     ['Organization', orgName],
     ['Generated', new Date().toLocaleString()],
     ['', ''],
@@ -164,7 +164,7 @@ export async function downloadWorkbook(data: ExportData, orgName: string): Promi
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
-  const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'Attendly';
+  const safe = orgName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'eHajeri';
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer;
   return saveFile(`${safe}_HR_Export_${stamp}.xlsx`, buf, MIME.xlsx);
 }

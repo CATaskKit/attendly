@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
       headers: {
         ...cors,
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': 'attachment; filename="Attendly_HR_Export.xlsx"',
+        'Content-Disposition': 'attachment; filename="eHajeri_HR_Export.xlsx"',
       },
     });
   } catch (e) {

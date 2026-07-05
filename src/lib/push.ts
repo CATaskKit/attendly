@@ -21,7 +21,7 @@ export async function initPush(onOpen?: (data: Record<string, unknown>) => void)
     try {
       await PushNotifications.createChannel({
         id: 'attendly_default',
-        name: 'Attendly',
+        name: 'eHajeri',
         description: 'Leave, attendance and announcement alerts',
         importance: 5,
         visibility: 1,

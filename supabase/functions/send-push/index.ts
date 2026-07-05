@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
 
     const accessToken = await getAccessToken(sa);
     const endpoint = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
-    const title = record.title || 'Attendly';
+    const title = record.title || 'eHajeri';
     const bodyText = record.body || '';
 
     const results = await Promise.all(tokens.map(async ({ token }) => {

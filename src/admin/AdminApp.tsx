@@ -189,7 +189,7 @@ export default function AdminApp() {
           <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(140deg, var(--accent), var(--accent-deep))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <AIcon name="check" size={20} color="#fff" sw={2.8} />
           </div>
-          <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em' }}>Attendly</div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em' }}>eHajeri</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {NAV.filter((it) => (it.id !== 'reimbursements' || !billing || reimbursementActive(billing)) && (it.id !== 'payroll' || canRunPayroll)).map((it) => {
@@ -697,7 +697,7 @@ function AddHolidayModal({ onClose, onSave }: { onClose: () => void; onSave: (h:
 // Reports & export ──────────────────────────────────────────────────
 function Reports({ orgId, onToast }: { orgId: string | null; onToast: (t: string, tone?: string, icon?: string) => void }) {
   const [data, setData] = useState<ExportData | null>(null);
-  const [orgName, setOrgName] = useState('Attendly');
+  const [orgName, setOrgName] = useState('eHajeri');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
