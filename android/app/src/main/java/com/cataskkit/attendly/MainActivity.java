@@ -1,4 +1,4 @@
-package com.cataskkit.ehajri;
+package com.cataskkit.attendly;
 
 import com.getcapacitor.BridgeActivity;
 

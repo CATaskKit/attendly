@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
         message: {
           token,
           notification: { title, body: bodyText },
-          android: { priority: 'HIGH', notification: { sound: 'default', channel_id: 'ehajri_default' } },
+          android: { priority: 'HIGH', notification: { sound: 'default', channel_id: 'attendly_default' } },
           data: { type: String(record.type ?? ''), id: String(record.id ?? '') },
         },
       };

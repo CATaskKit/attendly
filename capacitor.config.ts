@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.cataskkit.ehajri',
+  appId: 'com.cataskkit.attendly',
   appName: 'eHajri',
   // Vite outputs the production web build here; `cap sync` copies it into the
   // native Android project (android/app/src/main/assets/public).

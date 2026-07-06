@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         amount,
         currency: 'INR',
-        receipt: `ehajri_${Date.now()}`,
+        receipt: `attendly_${Date.now()}`,
         notes: { org_id: profile.org_id, seats: String(seats), period_end: newPeriodEnd, reimbursement: String(wantReimb), subtotal_inr: String(amountInr), gst_inr: String(gstInr), gst_rate: '0.18' },
       }),
     });
