@@ -2,7 +2,7 @@
 // across login, profile, logout and anywhere else the brand is shown.
 export const APP_NAME = 'eHajri';
 export const VENDOR = 'CATaskKit';
-export const APP_VERSION = '1.2.2';
+export const APP_VERSION = '1.4.0';
 export const APP_TAGLINE = 'Sign in to mark your attendance and manage leave.';
 
 // Public site URL used for emailed links (password reset, invites). MUST be the
